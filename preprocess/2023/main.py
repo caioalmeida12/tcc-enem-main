@@ -83,10 +83,25 @@ def remover_linhas_com_valores_invalidos(arquivo: list[dict[str, str]]):
     arquivo_validado: list[dict[str | any, str | any]] = []
 
     for row in arquivo:
-        if all(row.values()):
+        if all(v is not None and str(v).strip() != "" for v in row.values()):
             arquivo_validado.append(row)
 
     return arquivo_validado
+
+
+def remover_linhas_com_notas_zeradas(arquivo: list[dict[str, str]]):
+    arquivo_filtrado: list[dict[str, str]] = []
+
+    for row in arquivo:
+        notas_validas = all(
+            float(row[nota].replace(",", ".") if "," in row[nota] else row[nota]) > 0
+            for nota in colunas_notas
+        )
+
+        if notas_validas:
+            arquivo_filtrado.append(row)
+
+    return arquivo_filtrado
 
 
 def calcular_nota_geral_sem_redacao(row: dict[str, str]):
@@ -128,14 +143,15 @@ def salvar_arquivo_preprocessado(dados: list[dict[str, str]], caminho: str):
 
 def main():
     caminho_saida = (
-        "./preprocess/2023/microdados_enem_2023/PREPROCESS/PREPROCESSED_DATA.csv"
+        "./preprocess/2023/microdados_enem_2023/PREPROCESS/PREPROCESSED_DATA_100K.csv"
     )
 
     preprocessados = pipe(
-        "./preprocess/2023/microdados_enem_2023/DADOS/MICRODADOS_ENEM_2023.csv",
+        "./preprocess/2023/microdados_enem_2023/DADOS/MICRODADOS_ENEM_2023_100K.csv",
         carregar_arquivo,
         pegar_colunas_de_interresse,
         remover_linhas_com_valores_invalidos,
+        remover_linhas_com_notas_zeradas,
         criar_novas_colunas,
     )
 
