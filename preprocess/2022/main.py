@@ -5,13 +5,13 @@ import csv
 from toolz import pipe
 
 """
-Esse script tem como objetivo realizar o pré-processamento dos microdados do Enem 2023.
+Esse script tem como objetivo realizar o pré-processamento dos microdados do Enem 2022.
 O pré-processamento consiste em:
-1. Carregar os microdados do Enem 2023 (./microdados_enem_2023/DADOS/MICRODADOS_ENEM_2023.csv).
+1. Carregar os microdados do Enem 2022 (./microdados_enem_2022/DADOS/MICRODADOS_ENEM_2022.csv).
 2. Selecionar apenas as colunas de interesse.
 3. Remover valores inválidos (nulos, ausentes, etc).
 4. Criar novas colunas a partir das colunas existentes.
-5. Salvar os dados pré-processados em um arquivo CSV (./microdados_enem_2023/PREPROCESS/PREPROCESSED_DATA.csv).
+5. Salvar os dados pré-processados em um arquivo CSV (./microdados_enem_2022/PREPROCESS/PREPROCESSED_DATA.csv).
 """
 
 colunas_notas = [
@@ -128,11 +128,11 @@ def salvar_arquivo_preprocessado(dados: list[dict[str, str]], caminho: str):
 
 def main():
     caminho_saida = (
-        "./preprocess/2023/microdados_enem_2023/PREPROCESS/PREPROCESSED_DATA.csv"
+        "./preprocess/2022/microdados_enem_2022/PREPROCESS/PREPROCESSED_DATA.csv"
     )
 
     preprocessados = pipe(
-        "./preprocess/2023/microdados_enem_2023/DADOS/MICRODADOS_ENEM_2023.csv",
+        "./preprocess/2022/microdados_enem_2022/DADOS/MICRODADOS_ENEM_2022.csv",
         carregar_arquivo,
         pegar_colunas_de_interresse,
         remover_linhas_com_valores_invalidos,
