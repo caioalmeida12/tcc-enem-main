@@ -8,3 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
+
+preprocess/*/microdados_enem_*
