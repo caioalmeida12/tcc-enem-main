@@ -162,12 +162,12 @@ def normalizar_valores(df: pd.DataFrame) -> pd.DataFrame:
     """
     copia_df = df.copy()
 
-    colunas_numericas = copia_df.select_dtypes(include=np.number).columns
+    colunas = copia_df.columns
 
-    if not colunas_numericas.empty:
+    if not colunas.empty:
         scaler = MinMaxScaler()
-        copia_df[colunas_numericas] = scaler.fit_transform(copia_df[colunas_numericas])
-        copia_df[colunas_numericas] = copia_df[colunas_numericas].round(2)
+        copia_df[colunas] = scaler.fit_transform(copia_df[colunas])
+        copia_df[colunas] = copia_df[colunas].round(2)
 
     return copia_df
 
@@ -187,9 +187,7 @@ def salvar_arquivo_preprocessado(df: pd.DataFrame, caminho: str):
 
 
 def main():
-    caminho_base = (
-        "./preprocess/{ano}/microdados_enem_{ano}/DADOS/MICRODADOS_ENEM_{ano}_100K.csv"
-    )
+    caminho_base = "./preprocess/generico/microdados_enem_{ano}/DADOS/MICRODADOS_ENEM_{ano}_100K.csv"
     caminhos_dos_arquivos = [caminho_base.format(ano=ano) for ano in anos_para_carregar]
 
     caminho_saida = "./preprocess/generico/microdados_enem_combinado/PREPROCESS/PREPROCESSED_DATA.csv"
