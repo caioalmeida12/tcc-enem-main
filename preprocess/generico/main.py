@@ -109,12 +109,16 @@ def remover_linhas_com_notas_zeradas(df: pd.DataFrame) -> pd.DataFrame:
 
 def converter_opcoes_letra_para_numero(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Converte colunas com opções de letra (e.g., Q001, Q002) para números.
+    Converte colunas com opções de letra (e.g., Q001, Q002) e classificações para números.
     """
     copia_df = df.copy()
     colunas_com_opcoes_letra = [f"Q{i:03d}" for i in range(1, 26)]
+    colunas_classificacao = [
+        "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
+        "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
+    ]
 
-    for col in colunas_com_opcoes_letra:
+    for col in colunas_com_opcoes_letra + colunas_classificacao:
         if col in copia_df.columns:
             if pd.api.types.is_string_dtype(copia_df[col]):
                 copia_df[col] = copia_df[col].apply(
@@ -129,7 +133,7 @@ def converter_opcoes_letra_para_numero(df: pd.DataFrame) -> pd.DataFrame:
 
 def criar_novas_colunas(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Cria as colunas de nota geral com e sem redação.
+    Cria as colunas de nota geral com e sem redação. Cria também a coluna de classificação.
     """
     copia_df = df.copy()
     for col in colunas_notas:
@@ -154,6 +158,28 @@ def criar_novas_colunas(df: pd.DataFrame) -> pd.DataFrame:
             copia_df["NOTA_GERAL_SEM_REDACAO"] = np.nan
 
     return copia_df
+
+
+def criar_coluna_classificacao(df: pd.DataFrame) -> pd.DataFrame:
+    def classificar(nota):
+        if nota <= 400:
+            return "E"
+        elif nota < 500:
+            return "D"
+        elif nota < 600:
+            return "C"
+        elif nota < 700:
+            return "B"
+        else:
+            return "A"
+
+    df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = df["NOTA_GERAL_COM_REDACAO"].apply(
+        classificar
+    )
+    df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = df["NOTA_GERAL_SEM_REDACAO"].apply(
+        classificar
+    )
+    return df
 
 
 def normalizar_valores(df: pd.DataFrame) -> pd.DataFrame:
@@ -207,11 +233,11 @@ def main():
         pegar_colunas_de_interresse,
         remover_linhas_com_valores_invalidos,
         remover_linhas_com_notas_zeradas,
-        converter_opcoes_letra_para_numero,
         criar_novas_colunas,
+        criar_coluna_classificacao,
+        converter_opcoes_letra_para_numero,
         normalizar_valores,
     )
-
     salvar_arquivo_preprocessado(processed_df, caminho_saida)
     print("Pré-processamento concluído com sucesso.")
 
