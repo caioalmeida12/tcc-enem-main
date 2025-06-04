@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 Esse script tem como objetivo realizar o pré-processamento dos microdados do Enem 2023.
 O pré-processamento consiste em:
 1. Carregar os microdados do Enem 2023 (./microdados_enem_2023/DADOS/MICRODADOS_ENEM_2023.csv).
-2. Selecionar apenas as colunas de interesse.
+2. Selecionar todas as colunas do CSV (padrão).
 3. Remover valores inválidos (nulos, ausentes, etc).
 4. Criar novas colunas a partir das colunas existentes.
 5. Salvar os dados pré-processados em um arquivo CSV (./microdados_enem_2023/PREPROCESS/PREPROCESSED_DATA.csv).
@@ -29,29 +29,7 @@ colunas_notas = [
     "NU_NOTA_REDACAO",
 ]
 
-colunas_interesse = [
-    "Q012",
-    "Q013",
-    "Q014",
-    "Q015",
-    "Q016",
-    "Q018",
-    "Q019",
-    "Q020",
-    "Q021",
-    "Q025",
-    "Q002",
-    "Q003",
-    "Q004",
-    "Q008",
-    "Q009",
-    "Q022",
-    "TP_DEPENDENCIA_ADM_ESC",
-    "Q006",
-    "Q010",
-    "Q018",
-    "Q024",
-]
+colunas_interesse_original = []
 
 
 def carregar_arquivo(caminho: str) -> pd.DataFrame:
@@ -72,13 +50,29 @@ def carregar_arquivo(caminho: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def pegar_colunas_de_interresse(df: pd.DataFrame) -> pd.DataFrame:
+def pegar_colunas_de_interresse(df: pd.DataFrame, colunas: list = None) -> pd.DataFrame:
     """
     Seleciona apenas as colunas de interesse de um DataFrame.
+    Se nenhuma coluna for especificada, todas as colunas serão selecionadas.
     """
-    todas_colunas_interesse = list(set(colunas_interesse + colunas_notas))
-    colunas_existentes = [col for col in todas_colunas_interesse if col in df.columns]
-    return df[colunas_existentes].copy()
+    if colunas is None:
+        return df.copy()
+    else:
+        colunas_existentes = [col for col in colunas if col in df.columns]
+        return df[colunas_existentes].copy()
+
+
+def remover_colunas_especificas(
+    df: pd.DataFrame, colunas_para_remover: list
+) -> pd.DataFrame:
+    """
+    Remove colunas específicas de um DataFrame.
+    """
+    df_copy = df.copy()
+    existing_columns_to_drop = [
+        col for col in colunas_para_remover if col in df_copy.columns
+    ]
+    return df_copy.drop(columns=existing_columns_to_drop)
 
 
 def remover_linhas_com_valores_invalidos(df: pd.DataFrame) -> pd.DataFrame:
@@ -96,9 +90,10 @@ def remover_linhas_com_notas_zeradas(df: pd.DataFrame) -> pd.DataFrame:
     """
     copia_df = df.copy()
     for col in colunas_notas:
-        copia_df[col] = pd.to_numeric(
-            copia_df[col].astype(str).str.replace(",", "."), errors="coerce"
-        )
+        if col in copia_df.columns:
+            copia_df[col] = pd.to_numeric(
+                copia_df[col].astype(str).str.replace(",", "."), errors="coerce"
+            )
 
     for col in colunas_notas:
         if col in copia_df.columns:
@@ -112,45 +107,61 @@ def converter_opcoes_letra_para_numero(df: pd.DataFrame) -> pd.DataFrame:
     Converte colunas com opções de letra (e.g., Q001, Q002) e classificações para números.
     """
     copia_df = df.copy()
-    colunas_com_opcoes_letra = [f"Q{i:03d}" for i in range(1, 26)]
+
+    potential_letter_cols = [
+        col
+        for col in copia_df.columns
+        if pd.api.types.is_string_dtype(copia_df[col])
+        and copia_df[col].str.isalpha().any()
+        and copia_df[col].astype(str).str.len().max() == 1
+    ]
+
     colunas_classificacao = [
         "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
         "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
     ]
 
-    for col in colunas_com_opcoes_letra + colunas_classificacao:
-        if col in copia_df.columns:
-            if pd.api.types.is_string_dtype(copia_df[col]):
-                copia_df[col] = copia_df[col].apply(
-                    lambda x: (
-                        str(ord(x.upper()) - ord("A"))
-                        if isinstance(x, str) and len(x) == 1 and x.isalpha()
-                        else x
-                    )
+    for col in potential_letter_cols + colunas_classificacao:
+        if col in copia_df.columns and pd.api.types.is_string_dtype(copia_df[col]):
+            copia_df[col] = copia_df[col].apply(
+                lambda x: (
+                    str(ord(x.upper()) - ord("A"))
+                    if isinstance(x, str) and len(x) == 1 and x.isalpha()
+                    else x
                 )
+            )
+            copia_df[col] = pd.to_numeric(copia_df[col], errors="coerce")
     return copia_df
 
 
 def criar_novas_colunas(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Cria as colunas de nota geral com e sem redação. Cria também a coluna de classificação.
+    Cria as colunas de nota geral com e sem redação.
     """
     copia_df = df.copy()
     for col in colunas_notas:
         if col in copia_df.columns:
             copia_df[col] = pd.to_numeric(copia_df[col], errors="coerce")
 
-    copia_df.dropna(subset=colunas_notas, inplace=True)
+    copia_df.dropna(
+        subset=[col for col in colunas_notas if col in copia_df.columns], inplace=True
+    )
 
     if not copia_df.empty:
-        copia_df["NOTA_GERAL_COM_REDACAO"] = (
-            copia_df[colunas_notas].mean(axis=1).round(2)
-        )
+        existing_colunas_notas = [
+            col for col in colunas_notas if col in copia_df.columns
+        ]
+        if existing_colunas_notas:
+            copia_df["NOTA_GERAL_COM_REDACAO"] = (
+                copia_df[existing_colunas_notas].mean(axis=1).round(2)
+            )
+        else:
+            copia_df["NOTA_GERAL_COM_REDACAO"] = np.nan
 
-        cols_sem_redacao = [col for col in colunas_notas if col != "NU_NOTA_REDACAO"]
-        if cols_sem_redacao and all(
-            col in copia_df.columns for col in cols_sem_redacao
-        ):
+        cols_sem_redacao = [
+            col for col in existing_colunas_notas if col != "NU_NOTA_REDACAO"
+        ]
+        if cols_sem_redacao:
             copia_df["NOTA_GERAL_SEM_REDACAO"] = (
                 copia_df[cols_sem_redacao].mean(axis=1).round(2)
             )
@@ -162,23 +173,27 @@ def criar_novas_colunas(df: pd.DataFrame) -> pd.DataFrame:
 
 def criar_coluna_classificacao(df: pd.DataFrame) -> pd.DataFrame:
     def classificar(nota):
+        if pd.isna(nota):
+            return np.nan
         if nota <= 400:
-            return "E"
+            return "400 ou menos"
         elif nota < 500:
-            return "D"
+            return "400-499"
         elif nota < 600:
-            return "C"
+            return "500-599"
         elif nota < 700:
-            return "B"
+            return "600-699"
         else:
-            return "A"
+            return "700 ou mais"
 
-    df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = df["NOTA_GERAL_COM_REDACAO"].apply(
-        classificar
-    )
-    df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = df["NOTA_GERAL_SEM_REDACAO"].apply(
-        classificar
-    )
+    if "NOTA_GERAL_COM_REDACAO" in df.columns:
+        df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = df["NOTA_GERAL_COM_REDACAO"].apply(
+            classificar
+        )
+    if "NOTA_GERAL_SEM_REDACAO" in df.columns:
+        df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = df["NOTA_GERAL_SEM_REDACAO"].apply(
+            classificar
+        )
     return df
 
 
@@ -188,12 +203,12 @@ def normalizar_valores(df: pd.DataFrame) -> pd.DataFrame:
     """
     copia_df = df.copy()
 
-    colunas = copia_df.columns
+    numeric_cols = copia_df.select_dtypes(include=np.number).columns
 
-    if not colunas.empty:
+    if not numeric_cols.empty:
         scaler = MinMaxScaler()
-        copia_df[colunas] = scaler.fit_transform(copia_df[colunas])
-        copia_df[colunas] = copia_df[colunas].round(2)
+        copia_df[numeric_cols] = scaler.fit_transform(copia_df[numeric_cols])
+        copia_df[numeric_cols] = copia_df[numeric_cols].round(2)
 
     return copia_df
 
@@ -213,7 +228,9 @@ def salvar_arquivo_preprocessado(df: pd.DataFrame, caminho: str):
 
 
 def main():
-    caminho_base = "./preprocess/generico/microdados_enem_{ano}/DADOS/MICRODADOS_ENEM_{ano}_100K.csv"
+    caminho_base = (
+        "./preprocess/generico/microdados_enem_{ano}/DADOS/MICRODADOS_ENEM_{ano}.csv"
+    )
     caminhos_dos_arquivos = [caminho_base.format(ano=ano) for ano in anos_para_carregar]
 
     caminho_saida = "./preprocess/generico/microdados_enem_combinado/PREPROCESS/PREPROCESSED_DATA.csv"
@@ -226,18 +243,34 @@ def main():
         print("Nenhum arquivo de dados válido foi carregado. Saindo.")
         return
 
-    dataframe_combinado = pd.concat(todos_os_arquivos, ignore_index=True)
+    dataframe_combinado = pd.concat(todos_os_arquivos, ignore_index=True, sort=False)
+    colunas_para_remover_exemplo = [
+        "NU_INSCRICAO",
+        "IN_TREINEIRO",
+        "NO_MUNICIPIO_ESC",
+        "NO_MUNICIPIO_PROVA",
+        "TX_RESPOSTAS_CN",
+        "TX_GABARITO_CN",
+        "TX_RESPOSTAS_CH",
+        "TX_GABARITO_CH",
+        "TX_RESPOSTAS_LC",
+        "TX_GABARITO_LC",
+        "TX_RESPOSTAS_MT",
+        "TX_GABARITO_MT",
+    ]
 
     processed_df = pipe(
         dataframe_combinado,
         pegar_colunas_de_interresse,
+        lambda df: remover_colunas_especificas(df, colunas_para_remover_exemplo),
         remover_linhas_com_valores_invalidos,
         remover_linhas_com_notas_zeradas,
         criar_novas_colunas,
         criar_coluna_classificacao,
-        converter_opcoes_letra_para_numero,
-        normalizar_valores,
+        # converter_opcoes_letra_para_numero,
+        # normalizar_valores,
     )
+
     salvar_arquivo_preprocessado(processed_df, caminho_saida)
     print("Pré-processamento concluído com sucesso.")
 
