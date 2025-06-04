@@ -121,7 +121,8 @@ def plot_categorical_feature(
 
     # Adding percentage labels on top of the bars for clarity
     for container in ax.containers:
-        ax.bar_label(container, fmt="%.1f%%", label_type="edge", padding=3)
+        # Multiplicar o valor por 100 dentro do formatador
+        ax.bar_label(container, fmt=lambda x: f"{x * 100:.1f}%", label_type="edge")
 
     # Construct the detailed title
     title_details = (
