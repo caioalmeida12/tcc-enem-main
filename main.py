@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 from scipy.stats import chi2_contingency, f_oneway
+from sklearn.metrics import davies_bouldin_score  # Importar Davies-Bouldin
 from utils import (
     load_preprocessed_data,
     identify_feature_types,
@@ -23,15 +24,19 @@ DATA_PATH = (
 )
 
 # Lista de features categóricas pré-definidas para a ANOVA comparativa
-# Certifique-se de que estas colunas existem no seu DataFrame e são categóricas.
 ANOVA_PREDEFINED_CAT_FEATURES = [
     "TP_COR_RACA",
     "TP_DEPENDENCIA_ADM_ESC",
     "TP_SEXO",
     "TP_LINGUA",
     "TP_ESCOLA",
-    # Adicione outras features categóricas que você queira comparar automaticamente aqui
 ]
+
+# Definindo as features que provavelmente foram usadas para o Birch
+# Ajuste esta lista se outras features numéricas foram usadas no seu pré-processamento Birch
+FEATURES_FOR_CLUSTERING_EVAL = COLUNAS_NOTAS + [
+    "NU_NOTA_REDACAO"
+]  # Incluindo notas individuais e redação
 
 
 # Application start
@@ -124,8 +129,9 @@ def main():
         "Comparação Categórica entre Categorias Selecionadas",
         "Plots: Features Categóricas",
         "Teste Qui-Quadrado",
-        "Teste ANOVA (Seleção Manual)",  # Renomeado para clareza
-        "Análise ANOVA Comparativa (Pré-definida)",  # Nova opção
+        "Teste ANOVA (Seleção Manual)",
+        "Análise ANOVA Comparativa (Pré-definida)",
+        "Avaliação de Agrupamento (Davies-Bouldin)",  # Nova opção para Davies-Bouldin
         "Plots: Features Numéricas",
         "Estatísticas Gerais para Features Numéricas na Categoria",
         "Estatísticas Agrupadas por Feature Categórica (contagens)",
@@ -152,6 +158,115 @@ def main():
         "selected_numerical_features": selected_num_features,
     }
 
+    # --- Seção para Davies-Bouldin, fora dos loops de c_type e cls ---
+    if "Avaliação de Agrupamento (Davies-Bouldin)" in selected_visualizations:
+        st.header("✨ Avaliação de Agrupamento: Índice Davies-Bouldin")
+        st.markdown(
+            """
+            O Índice Davies-Bouldin avalia a qualidade dos agrupamentos gerados pelo algoritmo Birch.
+            **Valores mais baixos indicam agrupamentos melhores** (mais coesos internamente e mais separados entre si).
+            """
+        )
+
+        results_db = []
+        for cls_type_db in [
+            "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
+            "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
+        ]:
+            if cls_type_db not in df.columns:
+                results_db.append(
+                    {
+                        "Tipo de Classificação": cls_type_db,
+                        "Índice Davies-Bouldin": "N/A",
+                        "Observações": f"Coluna '{cls_type_db}' não encontrada.",
+                    }
+                )
+                continue
+
+            # Preparar dados para o Davies-Bouldin
+            # X: features numéricas usadas no agrupamento
+            # labels: os rótulos de cluster gerados (suas classificações)
+
+            # Filtrar NaNs nas features e nos rótulos antes de calcular
+            # É crucial que X e labels correspondam linha a linha
+            data_for_db = df[
+                [cls_type_db]
+                + [f for f in FEATURES_FOR_CLUSTERING_EVAL if f in df.columns]
+            ].dropna()
+
+            if data_for_db.empty:
+                results_db.append(
+                    {
+                        "Tipo de Classificação": cls_type_db,
+                        "Índice Davies-Bouldin": "N/A",
+                        "Observações": "Dados insuficientes para avaliação.",
+                    }
+                )
+                continue
+
+            X_db = data_for_db[
+                [f for f in FEATURES_FOR_CLUSTERING_EVAL if f in data_for_db.columns]
+            ]
+            labels_db = data_for_db[cls_type_db]
+
+            # O Davies-Bouldin exige pelo menos 2 clusters e um número mínimo de amostras
+            # Além disso, o número de clusters (k) não pode ser 1.
+            n_clusters = len(labels_db.unique())
+            if n_clusters < 2:
+                results_db.append(
+                    {
+                        "Tipo de Classificação": cls_type_db,
+                        "Índice Davies-Bouldin": "N/A",
+                        "Observações": f"Apenas {n_clusters} cluster(s) encontrado(s). Requer 2 ou mais clusters.",
+                    }
+                )
+                continue
+
+            if X_db.shape[0] < (
+                n_clusters + 1
+            ):  # Geralmente, n_samples >= n_clusters + 1 para o score
+                results_db.append(
+                    {
+                        "Tipo de Classificação": cls_type_db,
+                        "Índice Davies-Bouldin": "N/A",
+                        "Observações": f"Número de amostras ({X_db.shape[0]}) insuficiente para o número de clusters ({n_clusters}).",
+                    }
+                )
+                continue
+
+            try:
+                score = davies_bouldin_score(X_db, labels_db)
+                results_db.append(
+                    {
+                        "Tipo de Classificação": cls_type_db,
+                        "Índice Davies-Bouldin": f"{score:.4f}",
+                        "Observações": "Avaliação concluída.",
+                    }
+                )
+            except ValueError as ve:
+                results_db.append(
+                    {
+                        "Tipo de Classificação": cls_type_db,
+                        "Índice Davies-Bouldin": "Erro",
+                        "Observações": f"Erro de cálculo: {ve}. Verifique se há variância zero em algum cluster ou número de amostras muito pequeno.",
+                    }
+                )
+            except Exception as e:
+                results_db.append(
+                    {
+                        "Tipo de Classificação": cls_type_db,
+                        "Índice Davies-Bouldin": "Erro",
+                        "Observações": f"Erro inesperado: {e}",
+                    }
+                )
+
+        if results_db:
+            st.dataframe(pd.DataFrame(results_db))
+        else:
+            st.info("Nenhum resultado de Davies-Bouldin gerado.")
+    # --- FIM Seção Davies-Bouldin ---
+
+    # As seções abaixo permanecem como estavam, dentro dos loops de c_type e cls
     for c_type in classification_types:
         st.subheader(f"🔍 Classificação: **{c_type.replace('_', ' ')}**")
 
@@ -478,7 +593,7 @@ def main():
                     )
             # --- FIM Teste ANOVA (Seleção Manual) ---
 
-            # --- NOVO: Análise ANOVA Comparativa (Pré-definida) ---
+            # --- Análise ANOVA Comparativa (Pré-definida) ---
             if "Análise ANOVA Comparativa (Pré-definida)" in selected_visualizations:
                 st.markdown(
                     "#### 📊 Análise ANOVA Comparativa (Variáveis Pré-definidas)"
@@ -487,7 +602,6 @@ def main():
                     "Resultados da ANOVA para a feature numérica selecionada, comparada com um conjunto fixo de variáveis classificatórias."
                 )
 
-                # Options for numerical features (dependent variable)
                 anova_comparative_num_feature_options = sorted(
                     list(
                         set(
@@ -532,7 +646,6 @@ def main():
                             )
                             continue
 
-                        # Use o df_filtered para garantir que a ANOVA é para a categoria de nota atual
                         df_anova_comp = df_filtered[
                             [selected_anova_num_feature, cat_feat]
                         ].dropna()
@@ -575,7 +688,11 @@ def main():
                                 f_statistic, p_value = f_oneway(*valid_groups)
 
                                 is_significant = "Sim" if p_value < 0.05 else "Não"
-                                obs = f"Média(s): {df_anova_comp.groupby(cat_feat)[selected_anova_num_feature].mean().round(2).to_dict()}"
+                                # Apenas para referência, o cálculo da média por grupo pode ser custoso para muitas categorias
+                                # e já é feito na seção de Estatísticas Agrupadas.
+                                # Por simplicidade aqui, vamos apenas indicar a significância.
+                                obs = f"Média(s) dos grupos em '{selected_anova_num_feature}' variam."
+                                # Para ver as médias, o usuário pode ir na seção de estatísticas agrupadas
 
                                 results_list.append(
                                     {
@@ -594,7 +711,7 @@ def main():
                                     "Valor F": "Erro",
                                     "p-valor": "Erro",
                                     "Associação Significativa (p < 0.05)": "Erro",
-                                    "Observações": f"Erro ao calcular: {ve}",
+                                    "Observações": f"Erro de cálculo: {ve}",
                                 }
                             )
                         except Exception as e:
@@ -609,8 +726,11 @@ def main():
                             )
 
                     if results_list:
-                        results_df = pd.DataFrame(results_list)
-                        st.dataframe(results_df.set_index("Variável Classificatória"))
+                        st.dataframe(
+                            pd.DataFrame(results_list).set_index(
+                                "Variável Classificatória"
+                            )
+                        )
                     else:
                         st.info(
                             "Nenhum resultado de ANOVA gerado para as variáveis pré-definidas."
@@ -620,7 +740,7 @@ def main():
                         "Selecione uma Feature Numérica para iniciar a Análise ANOVA Comparativa."
                     )
 
-            # --- FIM NOVO: Análise ANOVA Comparativa (Pré-definida) ---
+            # --- FIM Análise ANOVA Comparativa (Pré-definida) ---
 
             if "Plots: Features Numéricas" in selected_visualizations:
                 if selected_num_features:
