@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from scipy.stats import chi2_contingency
+from scipy.stats import chi2_contingency, f_oneway
 from utils import (
     load_preprocessed_data,
     identify_feature_types,
@@ -21,6 +21,17 @@ st.set_page_config(layout="wide", page_title="Análise ENEM - Classificações d
 DATA_PATH = (
     "./preprocess/generico/microdados_enem_combinado/PREPROCESS/PREPROCESSED_DATA.csv"
 )
+
+# Lista de features categóricas pré-definidas para a ANOVA comparativa
+# Certifique-se de que estas colunas existem no seu DataFrame e são categóricas.
+ANOVA_PREDEFINED_CAT_FEATURES = [
+    "TP_COR_RACA",
+    "TP_DEPENDENCIA_ADM_ESC",
+    "TP_SEXO",
+    "TP_LINGUA",
+    "TP_ESCOLA",
+    # Adicione outras features categóricas que você queira comparar automaticamente aqui
+]
 
 
 # Application start
@@ -113,13 +124,14 @@ def main():
         "Comparação Categórica entre Categorias Selecionadas",
         "Plots: Features Categóricas",
         "Teste Qui-Quadrado",
+        "Teste ANOVA (Seleção Manual)",  # Renomeado para clareza
+        "Análise ANOVA Comparativa (Pré-definida)",  # Nova opção
         "Plots: Features Numéricas",
         "Estatísticas Gerais para Features Numéricas na Categoria",
-        "Estatísticas Agrupadas por Feature Categórica (contagens)",  # Novo nome para ser mais claro
+        "Estatísticas Agrupadas por Feature Categórica (contagens)",
         "Estatísticas Agrupadas por Feature Categórica (médias/medianas)",
     ]
 
-    # Estado da sessão para manter a seleção de visualizações
     if "selected_visualizations" not in st.session_state:
         st.session_state.selected_visualizations = [
             "Estatísticas Gerais para Features Numéricas na Categoria"
@@ -288,9 +300,7 @@ def main():
                     )
 
             if "Teste Qui-Quadrado" in selected_visualizations:
-                if (
-                    selected_cat_features
-                ):  # O teste Qui-Quadrado faz sentido para features categóricas
+                if selected_cat_features:
                     st.markdown("#### Teste Qui-Quadrado")
                     for feature in selected_cat_features:
                         st.markdown(
@@ -309,7 +319,6 @@ def main():
                         else:
                             contingency_table = contingency_table_full
 
-                        # Check for empty tables or tables with insufficient dimensions/zero cells
                         if (
                             contingency_table.empty
                             or contingency_table.shape[0] < 2
@@ -361,6 +370,257 @@ def main():
                     st.info(
                         "Selecione features categóricas para realizar o teste Qui-Quadrado."
                     )
+
+            # --- Teste ANOVA (Seleção Manual) ---
+            if "Teste ANOVA (Seleção Manual)" in selected_visualizations:
+                st.markdown("#### 🧪 Teste ANOVA (Seleção Manual)")
+                st.write(
+                    "Compare as médias de uma feature numérica entre grupos definidos por uma feature categórica."
+                )
+
+                anova_num_feature_options = sorted(
+                    list(
+                        set(
+                            num_features
+                            + COLUNAS_NOTAS
+                            + [
+                                "NOTA_GERAL_COM_REDACAO",
+                                "NOTA_GERAL_SEM_REDACAO",
+                                "Q006",
+                                "Q022",
+                                "Q024",
+                                "Q008",
+                            ]
+                        )
+                    )
+                )
+                anova_num_feature = st.selectbox(
+                    f"Selecione a Feature Numérica (dependente) para ANOVA na categoria '{cls}':",
+                    options=["Nenhuma"]
+                    + [
+                        f
+                        for f in anova_num_feature_options
+                        if f in df.columns and pd.api.types.is_numeric_dtype(df[f])
+                    ],
+                    key=f"anova_manual_num_feature_{c_type}_{cls}",
+                )
+
+                anova_cat_feature = st.selectbox(
+                    f"Selecione a Feature Categórica (independente/agrupamento) para ANOVA na categoria '{cls}':",
+                    options=["Nenhuma"] + [f for f in cat_features if f in df.columns],
+                    key=f"anova_manual_cat_feature_{c_type}_{cls}",
+                )
+
+                if anova_num_feature != "Nenhuma" and anova_cat_feature != "Nenhuma":
+                    st.markdown(
+                        f"##### ANOVA para '{anova_num_feature}' agrupado por '{anova_cat_feature}'"
+                    )
+
+                    df_anova = df[df[c_type].astype(str) == str(cls)][
+                        [anova_num_feature, anova_cat_feature]
+                    ].dropna()
+
+                    if df_anova.empty:
+                        st.warning(
+                            f"Não há dados suficientes para realizar ANOVA com as seleções '{anova_num_feature}' e '{anova_cat_feature}' para a categoria '{cls}'."
+                        )
+                    else:
+                        try:
+                            groups = [
+                                df_anova[anova_num_feature][
+                                    df_anova[anova_cat_feature] == category
+                                ].dropna()
+                                for category in df_anova[anova_cat_feature].unique()
+                            ]
+
+                            valid_groups = [g for g in groups if g.count() > 1]
+
+                            if len(valid_groups) < 2:
+                                st.warning(
+                                    f"Não há grupos suficientes (mínimo de 2 grupos com mais de uma observação) para realizar a ANOVA para '{anova_num_feature}' agrupado por '{anova_cat_feature}' na categoria '{cls}'."
+                                )
+                            else:
+                                f_statistic, p_value = f_oneway(*valid_groups)
+
+                                st.write(f"**F-Estatística:** {f_statistic:.2f}")
+                                st.write(f"**p-valor:** {p_value:.5f}")
+
+                                if p_value < 0.05:
+                                    st.success(
+                                        f"Há uma diferença estatisticamente significativa nas médias de '{anova_num_feature}' entre os grupos de '{anova_cat_feature}' (p < 0.05)."
+                                    )
+                                else:
+                                    st.info(
+                                        f"Não há evidência de diferença estatisticamente significativa nas médias de '{anova_num_feature}' entre os grupos de '{anova_cat_feature}' (p >= 0.05)."
+                                    )
+
+                                st.markdown(f"**Estatísticas Descritivas por Grupo:**")
+                                grouped_stats = (
+                                    df_anova.groupby(anova_cat_feature)[
+                                        anova_num_feature
+                                    ]
+                                    .agg(["count", "mean", "std"])
+                                    .reset_index()
+                                )
+                                st.dataframe(grouped_stats)
+
+                        except ValueError as ve:
+                            st.warning(
+                                f"Erro ao realizar ANOVA: {ve}. Isso pode ocorrer se os grupos tiverem variância zero ou não houver dados suficientes."
+                            )
+                        except Exception as e:
+                            st.error(
+                                f"Ocorreu um erro inesperado ao calcular ANOVA para '{anova_num_feature}' agrupado por '{anova_cat_feature}': {e}"
+                            )
+                elif "Teste ANOVA (Seleção Manual)" in selected_visualizations:
+                    st.info(
+                        "Selecione uma feature numérica e uma feature categórica para realizar o Teste ANOVA."
+                    )
+            # --- FIM Teste ANOVA (Seleção Manual) ---
+
+            # --- NOVO: Análise ANOVA Comparativa (Pré-definida) ---
+            if "Análise ANOVA Comparativa (Pré-definida)" in selected_visualizations:
+                st.markdown(
+                    "#### 📊 Análise ANOVA Comparativa (Variáveis Pré-definidas)"
+                )
+                st.write(
+                    "Resultados da ANOVA para a feature numérica selecionada, comparada com um conjunto fixo de variáveis classificatórias."
+                )
+
+                # Options for numerical features (dependent variable)
+                anova_comparative_num_feature_options = sorted(
+                    list(
+                        set(
+                            num_features
+                            + COLUNAS_NOTAS
+                            + [
+                                "NOTA_GERAL_COM_REDACAO",
+                                "NOTA_GERAL_SEM_REDACAO",
+                                "Q006",
+                                "Q022",
+                                "Q024",
+                                "Q008",
+                            ]
+                        )
+                    )
+                )
+
+                selected_anova_num_feature = st.selectbox(
+                    f"Selecione a Feature Numérica (dependente) para Análise ANOVA Comparativa na categoria '{cls}':",
+                    options=["Nenhuma"]
+                    + [
+                        f
+                        for f in anova_comparative_num_feature_options
+                        if f in df.columns and pd.api.types.is_numeric_dtype(df[f])
+                    ],
+                    key=f"anova_comparative_num_feature_{c_type}_{cls}",
+                )
+
+                if selected_anova_num_feature != "Nenhuma":
+                    results_list = []
+
+                    for cat_feat in ANOVA_PREDEFINED_CAT_FEATURES:
+                        if cat_feat not in df.columns:
+                            results_list.append(
+                                {
+                                    "Variável Classificatória": cat_feat,
+                                    "Valor F": "N/A",
+                                    "p-valor": "N/A",
+                                    "Associação Significativa (p < 0.05)": "Coluna não encontrada",
+                                    "Observações": "N/A",
+                                }
+                            )
+                            continue
+
+                        # Use o df_filtered para garantir que a ANOVA é para a categoria de nota atual
+                        df_anova_comp = df_filtered[
+                            [selected_anova_num_feature, cat_feat]
+                        ].dropna()
+
+                        if df_anova_comp.empty:
+                            results_list.append(
+                                {
+                                    "Variável Classificatória": cat_feat,
+                                    "Valor F": "N/A",
+                                    "p-valor": "N/A",
+                                    "Associação Significativa (p < 0.05)": "Dados Insuficientes",
+                                    "Observações": "Não há dados após filtrar NaNs para esta combinação.",
+                                }
+                            )
+                            continue
+
+                        try:
+                            groups = [
+                                df_anova_comp[selected_anova_num_feature][
+                                    df_anova_comp[cat_feat] == category
+                                ].dropna()
+                                for category in df_anova_comp[cat_feat].unique()
+                            ]
+
+                            valid_groups = [
+                                g for g in groups if g.count() > 1
+                            ]  # Groups must have at least 2 observations
+
+                            if len(valid_groups) < 2:
+                                results_list.append(
+                                    {
+                                        "Variável Classificatória": cat_feat,
+                                        "Valor F": "N/A",
+                                        "p-valor": "N/A",
+                                        "Associação Significativa (p < 0.05)": "Grupos Insuficientes",
+                                        "Observações": "Menos de 2 grupos com dados suficientes para ANOVA.",
+                                    }
+                                )
+                            else:
+                                f_statistic, p_value = f_oneway(*valid_groups)
+
+                                is_significant = "Sim" if p_value < 0.05 else "Não"
+                                obs = f"Média(s): {df_anova_comp.groupby(cat_feat)[selected_anova_num_feature].mean().round(2).to_dict()}"
+
+                                results_list.append(
+                                    {
+                                        "Variável Classificatória": cat_feat,
+                                        "Valor F": f"{f_statistic:.2f}",
+                                        "p-valor": f"{p_value:.5f}",
+                                        "Associação Significativa (p < 0.05)": is_significant,
+                                        "Observações": obs,
+                                    }
+                                )
+
+                        except ValueError as ve:
+                            results_list.append(
+                                {
+                                    "Variável Classificatória": cat_feat,
+                                    "Valor F": "Erro",
+                                    "p-valor": "Erro",
+                                    "Associação Significativa (p < 0.05)": "Erro",
+                                    "Observações": f"Erro ao calcular: {ve}",
+                                }
+                            )
+                        except Exception as e:
+                            results_list.append(
+                                {
+                                    "Variável Classificatória": cat_feat,
+                                    "Valor F": "Erro",
+                                    "p-valor": "Erro",
+                                    "Associação Significativa (p < 0.05)": "Erro",
+                                    "Observações": f"Erro inesperado: {e}",
+                                }
+                            )
+
+                    if results_list:
+                        results_df = pd.DataFrame(results_list)
+                        st.dataframe(results_df.set_index("Variável Classificatória"))
+                    else:
+                        st.info(
+                            "Nenhum resultado de ANOVA gerado para as variáveis pré-definidas."
+                        )
+                else:
+                    st.info(
+                        "Selecione uma Feature Numérica para iniciar a Análise ANOVA Comparativa."
+                    )
+
+            # --- FIM NOVO: Análise ANOVA Comparativa (Pré-definida) ---
 
             if "Plots: Features Numéricas" in selected_visualizations:
                 if selected_num_features:
@@ -499,7 +759,7 @@ def main():
                                 if not df_filtered[grouping_cat_feature].empty:
                                     try:
                                         counts_df = (
-                                            df_filtered[group_cat_feature]
+                                            df_filtered[grouping_cat_feature]
                                             .value_counts()
                                             .reset_index()
                                         )
