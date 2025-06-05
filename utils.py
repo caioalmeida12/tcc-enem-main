@@ -1,10 +1,13 @@
 import streamlit as st
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
-import numpy as np
-import io
+import seaborn as sns
 
+# --- (Suas funções load_preprocessed_data, identify_feature_types, init_session_state aqui) ---
+# Copiei apenas as definições para contexto, mas o foco é na nova função de plotagem.
+
+# Define COLUNAS_NOTAS if it's not already defined globally in your utils.py
+# If it's imported from another file, ensure that file exists and is correct.
 COLUNAS_NOTAS = [
     "NU_NOTA_CN",
     "NU_NOTA_CH",
@@ -14,187 +17,435 @@ COLUNAS_NOTAS = [
 ]
 
 
-def load_preprocessed_data(path: str) -> pd.DataFrame:
+def load_preprocessed_data(path):
+    """
+    Loads preprocessed data from a CSV file, explicitly converting
+    known numerical columns to numeric types.
+    """
     try:
-        return pd.read_csv(path, delimiter=";", encoding="utf-8")
+        # Read all columns as strings initially to handle potential mixed types
+        # or non-numeric entries gracefully.
+        df = pd.read_csv(path, sep=";", dtype=str)
+
+        # Define columns that should be numeric
+        numeric_cols_to_convert = [
+            "NU_NOTA_CN",
+            "NU_NOTA_CH",
+            "NU_NOTA_LC",
+            "NU_NOTA_MT",
+            "NU_NOTA_COMP1",
+            "NU_NOTA_COMP2",
+            "NU_NOTA_COMP3",
+            "NU_NOTA_COMP4",
+            "NU_NOTA_COMP5",
+            "NU_NOTA_REDACAO",
+            "NOTA_GERAL_COM_REDACAO",
+            "NOTA_GERAL_SEM_REDACAO",
+            "Q006",
+            "Q022",
+            "Q024",
+            "Q008",  # Added the new Q columns here
+        ]
+
+        for col in numeric_cols_to_convert:
+            if col in df.columns:
+                # Use errors='coerce' to turn unparseable values into NaN
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+    except FileNotFoundError:
+        st.error(f"Erro: Arquivo não encontrado no caminho: {path}")
+        st.stop()
     except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+        st.error(f"Erro ao carregar ou pré-processar os dados: {e}")
         st.stop()
 
 
-def identify_feature_types(df: pd.DataFrame):
-    cat, num = [], []
-    excl = set(
-        COLUNAS_NOTAS
-        + [
-            "NOTA_GERAL_COM_REDACAO",
-            "NOTA_GERAL_SEM_REDACAO",
-            "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
-            "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
-            "NU_INSCRICAO",
-            "NU_ANO",
-        ]
-    )
-    excl.update(
-        [
-            col
-            for col in df.columns
-            if "MUNICIPIO" in col
-            or "UF" in col
-            or "GABARITO" in col
-            or "TX_RESPOSTAS" in col
-        ]
-    )
+def identify_feature_types(df):
+    """
+    Identifies categorical and numerical features in the DataFrame.
+    Converts object columns to category if they have few unique values.
+    """
+    cat_features = []
+    num_features = []
     for col in df.columns:
-        if col in excl:
-            continue
-        if df[col].dtype == "object" or col.startswith(("Q", "TP_")):
-            cat.append(col)
-        elif pd.api.types.is_numeric_dtype(df[col]):
-            num.append(col)
-    for col in cat:
-        df[col] = df[col].astype("category")
-    return df, sorted(cat), sorted(num)
+        if pd.api.types.is_numeric_dtype(df[col]):
+            num_features.append(col)
+        elif df[col].nunique() < 50 and df[col].dtype == "object":
+            # Convert to category if it's an object type and has few unique values
+            df[col] = df[col].astype("category")
+            cat_features.append(col)
+        elif (
+            df[col].dtype == "object"
+        ):  # If it's an object and not converted to category (too many unique values)
+            cat_features.append(
+                col
+            )  # Treat as categorical (e.g., text IDs, though not ideal for direct plotting)
+
+    # Filter out columns that are classifications or grades as they are handled separately
+    # You might want to adjust this logic based on how strictly you define 'features' for plotting
+    exclude_from_features = [
+        "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
+        "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
+        "NOTA_GERAL_COM_REDACAO",
+        "NOTA_GERAL_SEM_REDACAO",
+    ] + COLUNAS_NOTAS
+
+    cat_features = [f for f in cat_features if f not in exclude_from_features]
+    num_features = [f for f in num_features if f not in exclude_from_features]
+
+    return df, sorted(cat_features), sorted(num_features)
 
 
-def init_session_state(cat, num):
-    st.session_state.setdefault(
-        "classification_types_selected", ["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"]
-    )
-    st.session_state.setdefault("selected_classifications_selected", [])
-    st.session_state.setdefault("selected_categorical_features_selected", cat[:5])
-    st.session_state.setdefault("selected_numerical_features_selected", num[:5])
+def init_session_state(cat_features, num_features):
+    """Initializes session state variables for feature selections."""
+    if "selected_categorical_features_selected" not in st.session_state:
+        st.session_state.selected_categorical_features_selected = []
+    if "selected_numerical_features_selected" not in st.session_state:
+        st.session_state.selected_numerical_features_selected = []
+    if "gallery_plots" not in st.session_state:
+        st.session_state.gallery_plots = []
 
 
-def restore_filters(filters):
-    st.session_state.classification_types_selected = filters["classification_types"]
-    st.session_state.selected_classifications_selected = filters[
-        "selected_classifications"
-    ]
-    st.session_state.selected_categorical_features_selected = filters[
-        "selected_categorical_features"
-    ]
-    st.session_state.selected_numerical_features_selected = filters[
-        "selected_numerical_features"
-    ]
-    st.rerun()
-
-
+# --- Função de plotagem de gráfico de barras com porcentagens (já modificada anteriormente) ---
 def plot_categorical_feature(
-    df,
+    df_original,
     df_filtered,
     feature,
-    c_type,
-    cls,
-    current_filters,
-    classification_types=None,
-    selected_classes=None,
+    classification_type,
+    selected_class,
+    filters,
+    classification_types,
+    selected_classes,
 ):
     """
-    Plots the distribution of a categorical feature for a specific note category.
+    Plots the distribution of a categorical feature for the filtered data
+    and compares it to the overall distribution, with percentage labels.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(20, 7))  # Increased width for labels
+
+    # Overall distribution
+    overall_counts = df_original[feature].value_counts()
+    overall_percentages = (overall_counts / len(df_original)) * 100
+    overall_df_plot = overall_percentages.reset_index()
+    overall_df_plot.columns = [feature, "Percentage"]
+
+    sns.barplot(
+        data=overall_df_plot,
+        x="Percentage",
+        y=feature,
+        ax=axes[0],
+        palette="viridis",
+        order=overall_counts.index,  # Maintain the order by counts
+    )
+    axes[0].set_title(f"Distribuição Geral de {feature} (%)", fontsize=14)
+    axes[0].set_xlabel("Porcentagem", fontsize=12)
+    axes[0].set_ylabel(feature, fontsize=12)
+    axes[0].tick_params(axis="y", labelsize=10)
+    axes[0].tick_params(axis="x", labelsize=10)
+    axes[0].grid(axis="x", linestyle="--", alpha=0.7)
+
+    # Add percentage labels to overall plot
+    for index, row in overall_df_plot.iterrows():
+        axes[0].text(
+            row["Percentage"] + 0.5,  # Slightly to the right of the bar
+            index,
+            f"{row['Percentage']:.1f}%",
+            color="black",
+            ha="left",
+            va="center",
+            fontsize=9,
+        )
+
+    # Filtered distribution
+    if not df_filtered.empty and feature in df_filtered.columns:
+        filtered_counts = df_filtered[feature].value_counts()
+        filtered_percentages = (filtered_counts / len(df_filtered)) * 100
+        filtered_df_plot = filtered_percentages.reset_index()
+        filtered_df_plot.columns = [feature, "Percentage"]
+
+        sns.barplot(
+            data=filtered_df_plot,
+            x="Percentage",
+            y=feature,
+            ax=axes[1],
+            palette="magma",
+            order=overall_counts.index,  # Use the same order as overall for consistency
+        )
+        axes[1].set_title(
+            f"Distribuição de {feature} para a Categoria '{selected_class}' (%)",
+            fontsize=14,
+        )
+        axes[1].set_xlabel("Porcentagem", fontsize=12)
+        axes[1].set_ylabel(feature, fontsize=12)
+        axes[1].tick_params(axis="y", labelsize=10)
+        axes[1].tick_params(axis="x", labelsize=10)
+        axes[1].grid(axis="x", linestyle="--", alpha=0.7)
+
+        # Add percentage labels to filtered plot
+        for index, row in filtered_df_plot.iterrows():
+            axes[1].text(
+                row["Percentage"] + 0.5,  # Slightly to the right of the bar
+                index,
+                f"{row['Percentage']:.1f}%",
+                color="black",
+                ha="left",
+                va="center",
+                fontsize=9,
+            )
+    else:
+        axes[1].set_title(
+            f"Sem dados para {feature} na categoria '{selected_class}'", fontsize=14
+        )
+        axes[1].text(
+            0.5,
+            0.5,
+            "Dados insuficientes para plotar",
+            horizontalalignment="center",
+            verticalalignment="center",
+            transform=axes[1].transAxes,
+            fontsize=12,
+            color="gray",
+        )
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    add_to_gallery(
+        fig,
+        f"Categórico: {feature} (Categoria: {selected_class})",
+        filters,
+        plot_type="categorical",
+        feature_name=feature,
+        classification_type=classification_type,
+        selected_class=selected_class,
+        classification_types_all=classification_types,
+        selected_classes_all=selected_classes,
+    )
+    plt.close(fig)
+
+
+# --- Função de plotagem de gráfico numérico (sem alterações para labels de porcentagem) ---
+def plot_numerical_feature(
+    df_original, df_filtered, feature, classification_type, selected_class, filters
+):
+    """
+    Plots the distribution (histogram and KDE) of a numerical feature
+    for the filtered data and compares it to the overall distribution.
+
+    Note: Adding percentage labels to every bin of a histogram or points
+    on a KDE curve is not standard practice as it can make the plot
+    very cluttered and is less interpretable than the overall shape.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+
+    # Overall distribution
+    sns.histplot(
+        df_original[feature].dropna(), kde=True, ax=axes[0], color="skyblue", bins=30
+    )
+    axes[0].set_title(f"Distribuição Geral de {feature}", fontsize=14)
+    axes[0].set_xlabel(feature, fontsize=12)
+    axes[0].set_ylabel("Densidade / Contagem", fontsize=12)
+    axes[0].tick_params(axis="x", labelsize=10)
+    axes[0].tick_params(axis="y", labelsize=10)
+    axes[0].grid(axis="y", linestyle="--", alpha=0.7)
+
+    # Filtered distribution
+    if not df_filtered.empty and feature in df_filtered.columns:
+        sns.histplot(
+            df_filtered[feature].dropna(), kde=True, ax=axes[1], color="salmon", bins=30
+        )
+        axes[1].set_title(
+            f"Distribuição de {feature} para a Categoria '{selected_class}'",
+            fontsize=14,
+        )
+        axes[1].set_xlabel(feature, fontsize=12)
+        axes[1].set_ylabel("Densidade / Contagem", fontsize=12)
+        axes[1].tick_params(axis="x", labelsize=10)
+        axes[1].tick_params(axis="y", labelsize=10)
+        axes[1].grid(axis="y", linestyle="--", alpha=0.7)
+    else:
+        axes[1].set_title(
+            f"Sem dados para {feature} na categoria '{selected_class}'", fontsize=14
+        )
+        axes[1].text(
+            0.5,
+            0.5,
+            "Dados insuficientes para plotar",
+            horizontalalignment="center",
+            verticalalignment="center",
+            transform=axes[1].transAxes,
+            fontsize=12,
+            color="gray",
+        )
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    add_to_gallery(
+        fig,
+        f"Numérico: {feature} (Categoria: {selected_class})",
+        filters,
+        plot_type="numerical",
+        feature_name=feature,
+        classification_type=classification_type,
+        selected_class=selected_class,
+    )
+    plt.close(fig)
+
+
+def add_to_gallery(
+    fig,
+    title,
+    filters,
+    plot_type,
+    feature_name,
+    classification_type,
+    selected_class,
+    classification_types_all=None,
+    selected_classes_all=None,
+):
+    """Adds a plot to the gallery in session state."""
+    # This function is meant to store plots for later display in a gallery section.
+    # The current implementation only stores the plot, but you might expand it
+    # to render the gallery on demand.
+    plot_info = {
+        "title": title,
+        "plot": fig,
+        "filters": filters,
+        "plot_type": plot_type,
+        "feature_name": feature_name,
+        "classification_type": classification_type,
+        "selected_class": selected_class,
+        "classification_types_all": classification_types_all,
+        "selected_classes_all": selected_classes_all,
+    }
+    # st.session_state.gallery_plots.append(plot_info) # Uncomment if you have a gallery display feature
+
+
+# --- NOVA FUNÇÃO PARA PLOTAR DISTRIBUIÇÃO COMPARATIVA COM PORCENTAGENS ---
+def plot_comparative_distribution_with_percentages(
+    df, x_feature, grouping_feature, title_prefix="", hue_order=None
+):
+    """
+    Plots a comparative distribution of a feature across different groups
+    with percentage labels on each data point.
 
     Args:
-        df (pd.DataFrame): The full preprocessed DataFrame.
-        df_filtered (pd.DataFrame): The DataFrame filtered by the current classification type and note category.
-        feature (str): The categorical feature to plot.
-        c_type (str): The classification type being analyzed (e.g., 'CLASSIFICACAO_NOTA_GERAL_COM_REDACAO').
-        cls (str): The specific note category being analyzed (e.g., '400-499').
-        current_filters (dict): A dictionary of all active filters from the sidebar.
-        classification_types (list, optional): List of selected classification types from the sidebar.
-        selected_classes (list, optional): List of selected note categories from the sidebar.
+        df (pd.DataFrame): The DataFrame containing the data.
+        x_feature (str): The column name for the x-axis (e.g., 'TP_COR_RACA').
+        grouping_feature (str): The column name used for grouping (e.g., 'CLASSIFICACAO_NOTA_GERAL_COM_REDACAO').
+        title_prefix (str): A prefix for the plot title.
+        hue_order (list, optional): The order for the 'hue' categories. Defaults to None.
     """
-    fig, ax = plt.subplots(figsize=(10, 6))
+    if df.empty:
+        st.warning("DataFrame vazio para plotar a distribuição comparativa.")
+        return
 
-    # Calculate value counts for the selected feature in the filtered DataFrame
-    # Normalize to get proportions
-    feature_counts = df_filtered[feature].value_counts(normalize=True).reset_index()
-    feature_counts.columns = [feature, "Proporção"]
+    # Calculate proportions
+    # Group by the grouping_feature and x_feature, then calculate proportions
+    # Make sure to dropna or handle NaNs appropriately for the calculation
+    df_plot = df.groupby([grouping_feature, x_feature]).size().unstack(fill_value=0)
+    df_proportions = (
+        df_plot.apply(lambda x: x / x.sum(), axis=1)
+        .stack()
+        .reset_index(name="Proportion")
+    )
 
-    # Plotting the bar chart
-    sns.barplot(
-        data=feature_counts,
-        x=feature,
-        y="Proporção",
+    # Convert 'Proportion' to percentage for display
+    df_proportions["Percentage"] = df_proportions["Proportion"] * 100
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    # Plot the lines and fill areas
+    sns.lineplot(
+        data=df_proportions,
+        x=x_feature,
+        y="Proportion",
+        hue=grouping_feature,
+        marker="o",
         ax=ax,
-        palette="viridis",  # Using a different palette for distinctness
+        linewidth=2.5,
+        alpha=0.7,
+        hue_order=hue_order,  # Use hue_order if provided for consistent coloring/legend
     )
 
-    # Adding percentage labels on top of the bars for clarity
-    for container in ax.containers:
-        # Multiplicar o valor por 100 dentro do formatador
-        ax.bar_label(container, fmt=lambda x: f"{x * 100:.1f}%", label_type="edge")
+    # Fill the area under the lines (similar to the image provided)
+    # This requires iterating through the groups
+    palette = sns.color_palette(n_colors=len(df_proportions[grouping_feature].unique()))
+    if hue_order:
+        # Map hue_order to palette colors
+        color_map = {group: palette[i] for i, group in enumerate(hue_order)}
+    else:
+        # Default mapping if no specific order is given
+        color_map = {
+            group: palette[i]
+            for i, group in enumerate(df_proportions[grouping_feature].unique())
+        }
 
-    # Construct the detailed title
-    title_details = (
-        f"Distribuição de '{feature}' para Categoria de Nota '{cls}'\n"
-        f"Baseado em Classificação: {c_type.replace('_', ' ')}"
-    )
+    for i, group in enumerate(df_proportions[grouping_feature].unique()):
+        group_data = df_proportions[
+            df_proportions[grouping_feature] == group
+        ].sort_values(x_feature)
+        ax.fill_between(
+            group_data[x_feature],
+            group_data["Proportion"],
+            alpha=0.2,  # Adjust transparency of the fill
+            color=color_map.get(
+                group, palette[i % len(palette)]
+            ),  # Get color from map or default
+        )
 
-    # Add general filter information to the title for full context
-    if classification_types:
-        title_details += f"\nTipo(s) de Classificação Selecionado(s): {', '.join(classification_types).replace('_', ' ')}"
-    if selected_classes:
-        # Only add if it's not just the current 'cls' (which is already in the first line)
-        if len(selected_classes) > 1 or selected_classes[0] != cls:
-            title_details += f"\nCategorias de Nota Selecionadas (Geral): {', '.join(selected_classes)}"
+    # Add percentage labels to each point
+    for line in ax.lines:
+        x_data = line.get_xdata()
+        y_data = line.get_ydata()
+        color = line.get_color()
+
+        # Get the corresponding group (hue) for this line
+        # This part assumes a direct mapping between line index and group
+        # This might need refinement based on how seaborn internally orders lines for 'hue'
+        # A more robust way would be to join with the original df_proportions
+
+        group_value = df_proportions.loc[
+            (df_proportions[x_feature].isin(x_data))
+            & (df_proportions["Proportion"].isin(y_data)),
+            grouping_feature,
+        ].iloc[
+            0
+        ]  # Get the first group value that matches the line's data
+
+        # Filter df_proportions to get only the data points for the current line's group
+        current_line_proportions = df_proportions[
+            df_proportions[grouping_feature] == group_value
+        ]
+
+        # Ensure order for matching x_data, y_data with percentages
+        current_line_proportions = current_line_proportions.sort_values(x_feature)
+
+        for j, (x, y) in enumerate(zip(x_data, y_data)):
+            # Find the corresponding percentage
+            percentage = current_line_proportions.loc[
+                current_line_proportions[x_feature] == x, "Percentage"
+            ].iloc[0]
+
+            ax.text(
+                x,
+                y + 0.015,  # Slightly above the point
+                f"{percentage:.1f}%",
+                color=color,
+                fontsize=8,
+                ha="center",
+                va="bottom",
+            )
 
     ax.set_title(
-        title_details, fontsize=12, pad=20
-    )  # Increased padding for multi-line title
-    ax.set_ylabel("Proporção", fontsize=10)
-    ax.set_xlabel(feature, fontsize=10)
-    plt.xticks(rotation=45, ha="right")  # Rotate and align x-axis labels
-
-    plt.tight_layout()  # Adjust layout to prevent labels overlapping
+        f"{title_prefix}Distribuição Comparativa: {x_feature} por {grouping_feature}",
+        fontsize=16,
+    )
+    ax.set_xlabel(x_feature, fontsize=12)
+    ax.set_ylabel("Proporção", fontsize=12)
+    ax.tick_params(axis="x", rotation=45, labelsize=10)
+    ax.tick_params(axis="y", labelsize=10)
+    ax.legend(title=grouping_feature, bbox_to_anchor=(1.05, 1), loc="upper left")
+    ax.grid(True, linestyle="--", alpha=0.7)
+    plt.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
-
-
-def plot_numerical_feature(df, df_filtered, feature, c_type, cls, filters):
-    fig, ax = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={"height_ratios": [3, 1]})
-    sns.histplot(
-        df_filtered[feature], kde=True, ax=ax[0], color="skyblue", label="Selecionada"
-    )
-    sns.histplot(
-        df[feature], kde=True, ax=ax[0], color="orange", alpha=0.5, label="Geral"
-    )
-    ax[0].legend()
-    ax[0].set_title("Distribuição")
-
-    sns.boxplot(x=df_filtered[feature], ax=ax[1], color="skyblue")
-    ax[1].set_title("Boxplot")
-
-    st.pyplot(fig)
-    if st.button(
-        f"Salvar Numérico: {feature} - {cls}", key=f"save_num_{c_type}_{cls}_{feature}"
-    ):
-        add_to_gallery(fig, c_type, cls, feature, "Numérico", filters)
-    plt.close(fig)
-
-
-def add_to_gallery(fig, c_type, selected_classification, feature, plot_type, filters):
-    if "gallery_items" not in st.session_state:
-        st.session_state.gallery_items = []
-
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png")
-    buf.seek(0)
-
-    title = f"{plot_type} - {feature} - {selected_classification} ({c_type})"
-    for item in st.session_state.gallery_items:
-        if item["title"] == title:
-            st.warning("Gráfico já está na galeria.")
-            return
-
-    st.session_state.gallery_items.append(
-        {
-            "title": title,
-            "image_bytes": buf.getvalue(),
-            "filters": filters,
-            "c_type": c_type,
-            "selected_classification": selected_classification,
-            "feature_name": feature,
-            "plot_type": plot_type,
-        }
-    )
-    st.success(f"Gráfico '{title}' salvo com sucesso.")
