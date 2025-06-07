@@ -1,22 +1,21 @@
 import numpy as np
 import pandas as pd
 import os
-import csv
 from toolz import pipe
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
-from sklearn.cluster import (
-    AgglomerativeClustering,
-    DBSCAN,
-    Birch,  # Import para o algoritmo Birch
-)
-from scipy.cluster.hierarchy import (
-    dendrogram,
-    linkage,
-)
+from scipy.cluster.hierarchy import dendrogram, linkage
 
 import matplotlib.pyplot as plt
+
+# Importar as funções de clustering do novo módulo
+from preprocess.clustering.clustering_models import (
+    classificar_com_agrupamento_hierarquico,
+    classificar_com_dbscan,
+    classificar_com_birch,
+)
+
 
 """
 Esse script tem como objetivo realizar o pré-processamento dos microdados do Enem 2023.
@@ -37,8 +36,6 @@ colunas_notas = [
     "NU_NOTA_MT",
     "NU_NOTA_REDACAO",
 ]
-
-colunas_interesse_original = []
 
 # Dicionário de mapeamento para variáveis categóricas
 mapeamento_categorias = {
@@ -414,132 +411,6 @@ def plot_dendrogram(df: pd.DataFrame):
     plt.show()
 
 
-def classificar_com_agrupamento_hierarquico(
-    df: pd.DataFrame, n_clusters: int
-) -> pd.DataFrame:
-    """
-    Classifica as notas gerais usando agrupamento hierárquico.
-    A quantidade de clusters é definida pelo parâmetro `n_clusters`.
-    """
-    copia_df = df.copy()
-
-    score_cols = ["NOTA_GERAL_COM_REDACAO", "NOTA_GERAL_SEM_REDACAO"]
-    df_for_clustering = copia_df.dropna(subset=score_cols).copy()
-
-    if df_for_clustering.empty:
-        print("Nenhum dado válido para agrupamento hierárquico.")
-        copia_df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = np.nan
-        copia_df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = np.nan
-        return copia_df
-
-    cluster = AgglomerativeClustering(n_clusters=n_clusters, linkage="ward")
-    df_for_clustering["CLUSTER_LABEL"] = cluster.fit_predict(
-        df_for_clustering[score_cols]
-    )
-
-    copia_df = copia_df.merge(
-        df_for_clustering[["CLUSTER_LABEL"]],
-        left_index=True,
-        right_index=True,
-        how="left",
-    )
-
-    copia_df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = copia_df["CLUSTER_LABEL"]
-    copia_df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = copia_df["CLUSTER_LABEL"]
-    copia_df.drop(columns=["CLUSTER_LABEL"], inplace=True)
-
-    return copia_df
-
-
-def classificar_com_dbscan(
-    df: pd.DataFrame, eps: float = 0.5, min_samples: int = 5
-) -> pd.DataFrame:
-    """
-    Classifica as notas gerais usando agrupamento DBSCAN.
-    Os parâmetros `eps` (distância máxima entre duas amostras para uma ser considerada na vizinhança da outra)
-    e `min_samples` (número de amostras em uma vizinhança para um ponto ser considerado um ponto central)
-    podem ser ajustados.
-    """
-    copia_df = df.copy()
-
-    score_cols = ["NOTA_GERAL_COM_REDACAO", "NOTA_GERAL_SEM_REDACAO"]
-
-    df_for_clustering = copia_df.dropna(subset=score_cols).copy()
-
-    if df_for_clustering.empty:
-        print("Nenhum dado válido para agrupamento DBSCAN.")
-        copia_df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = np.nan
-        copia_df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = np.nan
-        return copia_df
-
-    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-    df_for_clustering["CLUSTER_LABEL"] = dbscan.fit_predict(
-        df_for_clustering[score_cols]
-    )
-
-    copia_df = copia_df.merge(
-        df_for_clustering[["CLUSTER_LABEL"]],
-        left_index=True,
-        right_index=True,
-        how="left",
-    )
-
-    copia_df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = copia_df["CLUSTER_LABEL"]
-    copia_df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = copia_df["CLUSTER_LABEL"]
-    copia_df.drop(columns=["CLUSTER_LABEL"], inplace=True)
-
-    return copia_df
-
-
-def classificar_com_birch(
-    df: pd.DataFrame,
-    n_clusters: int,
-    threshold: float = 0.5,
-    branching_factor: int = 50,
-) -> pd.DataFrame:
-    """
-    Classifica as notas gerais usando o algoritmo BIRCH.
-    Os parâmetros `n_clusters`, `threshold` e `branching_factor` podem ser ajustados.
-    `threshold`: o raio do subcluster em torno do centroid.
-    `branching_factor`: o número máximo de subclusters CF em cada nó.
-    """
-    copia_df = df.copy()
-
-    score_cols = ["NOTA_GERAL_COM_REDACAO", "NOTA_GERAL_SEM_REDACAO"]
-    df_for_clustering = copia_df.dropna(subset=score_cols).copy()
-
-    if df_for_clustering.empty:
-        print("Nenhum dado válido para agrupamento BIRCH.")
-        copia_df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = np.nan
-        copia_df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = np.nan
-        return copia_df
-
-    # Inicializa e ajusta o modelo Birch
-    # n_clusters define o número final de clusters (opcional, pode ser None)
-    # Se n_clusters for None, os clusters serão os nós folha da CF-tree.
-    # Se for um int, um passo final de clustering (e.g., MiniBatchKMeans) será aplicado.
-    birch_model = Birch(
-        n_clusters=n_clusters, threshold=threshold, branching_factor=branching_factor
-    )
-
-    df_for_clustering["CLUSTER_LABEL"] = birch_model.fit_predict(
-        df_for_clustering[score_cols]
-    )
-
-    copia_df = copia_df.merge(
-        df_for_clustering[["CLUSTER_LABEL"]],
-        left_index=True,
-        right_index=True,
-        how="left",
-    )
-
-    copia_df["CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"] = copia_df["CLUSTER_LABEL"]
-    copia_df["CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO"] = copia_df["CLUSTER_LABEL"]
-    copia_df.drop(columns=["CLUSTER_LABEL"], inplace=True)
-
-    return copia_df
-
-
 def normalizar_valores(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normaliza os valores numéricos usando MinMaxScaler do scikit-learn.
@@ -635,7 +506,7 @@ def main():
         converter_opcoes_letra_para_numero,  # Adicionado ao pipeline
         lambda df: sample_dataframe(df, sampling_percentage),
         criar_novas_colunas,
-        lambda df: classificar_com_birch(df, n_clusters=4),
+        lambda df: classificar_com_birch(df, n_clusters=4),  # Usando a função importada
     )
 
     # Salva o DataFrame pré-processado
