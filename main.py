@@ -4,7 +4,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 from scipy.stats import chi2_contingency, f_oneway
-from sklearn.metrics import davies_bouldin_score  # Importar Davies-Bouldin
+from sklearn.metrics import (
+    davies_bouldin_score,
+    silhouette_score,
+    calinski_harabasz_score,  # Importar Calinski-Harabasz Score
+)
 from utils import (
     load_preprocessed_data,
     identify_feature_types,
@@ -30,6 +34,7 @@ ANOVA_PREDEFINED_CAT_FEATURES = [
     "TP_SEXO",
     "TP_LINGUA",
     "TP_ESCOLA",
+    # Adicione outras features categóricas que você queira comparar automaticamente aqui
 ]
 
 # Definindo as features que provavelmente foram usadas para o Birch
@@ -37,6 +42,14 @@ ANOVA_PREDEFINED_CAT_FEATURES = [
 FEATURES_FOR_CLUSTERING_EVAL = COLUNAS_NOTAS + [
     "NU_NOTA_REDACAO"
 ]  # Incluindo notas individuais e redação
+
+# --- Configuração para amostragem do Silhouette Score ---
+SILHOUETTE_SAMPLING_PERCENTAGE = 0.1  # 5% de amostragem
+MIN_SAMPLES_FOR_SAMPLING_SILHOUETTE = (
+    100_000  # Começa a amostrar se o dataset tiver mais de X linhas
+)
+# Isso evita amostragem em datasets já pequenos, onde o cálculo completo é rápido.
+# --- Fim da configuração de amostragem ---
 
 
 # Application start
@@ -131,7 +144,9 @@ def main():
         "Teste Qui-Quadrado",
         "Teste ANOVA (Seleção Manual)",
         "Análise ANOVA Comparativa (Pré-definida)",
-        "Avaliação de Agrupamento (Davies-Bouldin)",  # Nova opção para Davies-Bouldin
+        "Avaliação de Agrupamento (Davies-Bouldin)",
+        "Avaliação de Agrupamento (Silhouette Score)",
+        "Avaliação de Agrupamento (Calinski-Harabasz)",  # Adicionado Calinski-Harabasz
         "Plots: Features Numéricas",
         "Estatísticas Gerais para Features Numéricas na Categoria",
         "Estatísticas Agrupadas por Feature Categórica (contagens)",
@@ -158,7 +173,7 @@ def main():
         "selected_numerical_features": selected_num_features,
     }
 
-    # --- Seção para Davies-Bouldin, fora dos loops de c_type e cls ---
+    # --- Seção para Davies-Bouldin ---
     if "Avaliação de Agrupamento (Davies-Bouldin)" in selected_visualizations:
         st.header("✨ Avaliação de Agrupamento: Índice Davies-Bouldin")
         st.markdown(
@@ -183,12 +198,6 @@ def main():
                 )
                 continue
 
-            # Preparar dados para o Davies-Bouldin
-            # X: features numéricas usadas no agrupamento
-            # labels: os rótulos de cluster gerados (suas classificações)
-
-            # Filtrar NaNs nas features e nos rótulos antes de calcular
-            # É crucial que X e labels correspondam linha a linha
             data_for_db = df[
                 [cls_type_db]
                 + [f for f in FEATURES_FOR_CLUSTERING_EVAL if f in df.columns]
@@ -209,8 +218,6 @@ def main():
             ]
             labels_db = data_for_db[cls_type_db]
 
-            # O Davies-Bouldin exige pelo menos 2 clusters e um número mínimo de amostras
-            # Além disso, o número de clusters (k) não pode ser 1.
             n_clusters = len(labels_db.unique())
             if n_clusters < 2:
                 results_db.append(
@@ -222,9 +229,7 @@ def main():
                 )
                 continue
 
-            if X_db.shape[0] < (
-                n_clusters + 1
-            ):  # Geralmente, n_samples >= n_clusters + 1 para o score
+            if X_db.shape[0] < (n_clusters + 1):
                 results_db.append(
                     {
                         "Tipo de Classificação": cls_type_db,
@@ -265,6 +270,250 @@ def main():
         else:
             st.info("Nenhum resultado de Davies-Bouldin gerado.")
     # --- FIM Seção Davies-Bouldin ---
+
+    # --- NOVA Seção para Silhouette Score ---
+    if "Avaliação de Agrupamento (Silhouette Score)" in selected_visualizations:
+        st.header("✨ Avaliação de Agrupamento: Silhouette Score")
+        st.markdown(
+            """
+            O Silhouette Score avalia a qualidade dos agrupamentos gerados pelo algoritmo Birch.
+            **Valores mais próximos de 1 indicam agrupamentos melhores** (bem definidos e separados).
+            Valores próximos de 0 indicam clusters sobrepostos. Valores negativos indicam má atribuição.
+            """
+        )
+
+        results_silhouette = []
+        for cls_type_sil in [
+            "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
+            "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
+        ]:
+            if cls_type_sil not in df.columns:
+                results_silhouette.append(
+                    {
+                        "Tipo de Classificação": cls_type_sil,
+                        "Silhouette Score": "N/A",
+                        "Observações": f"Coluna '{cls_type_sil}' não encontrada.",
+                    }
+                )
+                continue
+
+            # Preparar dados para o Silhouette Score
+            data_for_sil = df[
+                [cls_type_sil]
+                + [f for f in FEATURES_FOR_CLUSTERING_EVAL if f in df.columns]
+            ].dropna()
+
+            if data_for_sil.empty:
+                results_silhouette.append(
+                    {
+                        "Tipo de Classificação": cls_type_sil,
+                        "Silhouette Score": "N/A",
+                        "Observações": "Dados insuficientes para avaliação.",
+                    }
+                )
+                continue
+
+            # --- Implementação da amostragem para Silhouette Score ---
+            current_num_samples = data_for_sil.shape[0]
+            sampling_applied = False
+            if current_num_samples > MIN_SAMPLES_FOR_SAMPLING_SILHOUETTE:
+                sample_size = max(
+                    2, int(current_num_samples * SILHOUETTE_SAMPLING_PERCENTAGE)
+                )  # Garante min 2 amostras
+                if (
+                    sample_size < current_num_samples
+                ):  # Só amostra se o tamanho da amostra for menor que o original
+                    data_for_sil_sampled = data_for_sil.sample(
+                        n=sample_size, random_state=42
+                    )
+                    X_sil = data_for_sil_sampled[
+                        [
+                            f
+                            for f in FEATURES_FOR_CLUSTERING_EVAL
+                            if f in data_for_sil_sampled.columns
+                        ]
+                    ]
+                    labels_sil = data_for_sil_sampled[cls_type_sil]
+                    sampling_applied = True
+                    st.info(
+                        f"Calculando Silhouette Score em uma amostra de {sample_size} de {current_num_samples} pontos para '{cls_type_sil}'."
+                    )
+                else:  # Se a amostra de 5% for maior ou igual ao original, usa o original
+                    X_sil = data_for_sil[
+                        [
+                            f
+                            for f in FEATURES_FOR_CLUSTERING_EVAL
+                            if f in data_for_sil.columns
+                        ]
+                    ]
+                    labels_sil = data_for_sil[cls_type_sil]
+            else:  # Se já for pequeno, usa o original
+                X_sil = data_for_sil[
+                    [
+                        f
+                        for f in FEATURES_FOR_CLUSTERING_EVAL
+                        if f in data_for_sil.columns
+                    ]
+                ]
+                labels_sil = data_for_sil[cls_type_sil]
+            # --- Fim da implementação da amostragem ---
+
+            n_clusters_sil = len(labels_sil.unique())
+            # Condições para calcular o Silhouette Score: 2 <= n_clusters <= n_samples - 1
+            if n_clusters_sil < 2 or n_clusters_sil >= X_sil.shape[0]:
+                results_silhouette.append(
+                    {
+                        "Tipo de Classificação": cls_type_sil,
+                        "Silhouette Score": "N/A",
+                        "Observações": f"Número de clusters ({n_clusters_sil}) ou amostras ({X_sil.shape[0]}) insuficiente para o cálculo. Requer 2 <= clusters < amostras.",
+                    }
+                )
+                continue
+
+            # Condição adicional: se todas as amostras em um cluster forem idênticas ou muito próximas, pode causar erro.
+            if X_sil.shape[0] <= 1:
+                results_silhouette.append(
+                    {
+                        "Tipo de Classificação": cls_type_sil,
+                        "Silhouette Score": "N/A",
+                        "Observações": "Apenas uma amostra ou menos após a filtragem.",
+                    }
+                )
+                continue
+
+            try:
+                score_sil = silhouette_score(X_sil, labels_sil)
+                obs_text = (
+                    "Avaliação concluída (amostra utilizada)."
+                    if sampling_applied
+                    else "Avaliação concluída."
+                )
+                results_silhouette.append(
+                    {
+                        "Tipo de Classificação": cls_type_sil,
+                        "Silhouette Score": f"{score_sil:.4f}",
+                        "Observações": obs_text,
+                    }
+                )
+            except ValueError as ve:
+                results_silhouette.append(
+                    {
+                        "Tipo de Classificação": cls_type_sil,
+                        "Silhouette Score": "Erro",
+                        "Observações": f"Erro de cálculo: {ve}. Pode ser devido a cluster com variância zero ou poucas amostras.",
+                    }
+                )
+            except Exception as e:
+                results_silhouette.append(
+                    {
+                        "Tipo de Classificação": cls_type_sil,
+                        "Silhouette Score": "Erro",
+                        "Observações": f"Erro inesperado: {e}",
+                    }
+                )
+
+        if results_silhouette:
+            st.dataframe(pd.DataFrame(results_silhouette))
+        else:
+            st.info("Nenhum resultado de Silhouette Score gerado.")
+    # --- FIM NOVA Seção Silhouette Score ---
+
+    # --- NOVA Seção para Calinski-Harabasz Score ---
+    if "Avaliação de Agrupamento (Calinski-Harabasz)" in selected_visualizations:
+        st.header("✨ Avaliação de Agrupamento: Índice Calinski-Harabasz")
+        st.markdown(
+            """
+            O Índice Calinski-Harabasz (também conhecido como Variance Ratio Criterion)
+            avalia a qualidade dos agrupamentos. **Valores mais altos indicam agrupamentos melhores**
+            (densos e bem separados).
+            """
+        )
+
+        results_ch = []
+        for cls_type_ch in [
+            "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
+            "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
+        ]:
+            if cls_type_ch not in df.columns:
+                results_ch.append(
+                    {
+                        "Tipo de Classificação": cls_type_ch,
+                        "Calinski-Harabasz Score": "N/A",
+                        "Observações": f"Coluna '{cls_type_ch}' não encontrada.",
+                    }
+                )
+                continue
+
+            # Preparar dados para o Calinski-Harabasz Score
+            data_for_ch = df[
+                [cls_type_ch]
+                + [f for f in FEATURES_FOR_CLUSTERING_EVAL if f in df.columns]
+            ].dropna()
+
+            if data_for_ch.empty:
+                results_ch.append(
+                    {
+                        "Tipo de Classificação": cls_type_ch,
+                        "Calinski-Harabasz Score": "N/A",
+                        "Observações": "Dados insuficientes para avaliação.",
+                    }
+                )
+                continue
+
+            X_ch = data_for_ch[
+                [f for f in FEATURES_FOR_CLUSTERING_EVAL if f in data_for_ch.columns]
+            ]
+            labels_ch = data_for_ch[cls_type_ch]
+
+            n_clusters_ch = len(labels_ch.unique())
+            # Condições para calcular o Calinski-Harabasz Score: 2 <= n_clusters <= n_samples - 1
+            if n_clusters_ch < 2 or n_clusters_ch >= X_ch.shape[0]:
+                results_ch.append(
+                    {
+                        "Tipo de Classificação": cls_type_ch,
+                        "Calinski-Harabasz Score": "N/A",
+                        "Observações": f"Número de clusters ({n_clusters_ch}) ou amostras ({X_ch.shape[0]}) insuficiente para o cálculo. Requer 2 <= clusters < amostras.",
+                    }
+                )
+                continue
+
+            # Calinski-Harabasz geralmente não requer amostragem tão rigorosa quanto Silhouette
+            # mas podemos aplicar a mesma lógica se os dados forem muito grandes.
+            # No entanto, a implementação padrão não faz amostragem aqui para Calinski-Harabasz
+            # para dar um cálculo mais "completo" se possível, já que é geralmente mais rápido.
+            # Se a performance for um problema, a amostragem pode ser aplicada aqui também.
+
+            try:
+                score_ch = calinski_harabasz_score(X_ch, labels_ch)
+                results_ch.append(
+                    {
+                        "Tipo de Classificação": cls_type_ch,
+                        "Calinski-Harabasz Score": f"{score_ch:.4f}",
+                        "Observações": "Avaliação concluída.",
+                    }
+                )
+            except ValueError as ve:
+                results_ch.append(
+                    {
+                        "Tipo de Classificação": cls_type_ch,
+                        "Calinski-Harabasz Score": "Erro",
+                        "Observações": f"Erro de cálculo: {ve}. Pode ser devido a clusters com variância zero ou poucas amostras. Tente garantir que cada cluster tenha pelo menos 2 amostras e que as colunas numéricas tenham variância.",
+                    }
+                )
+            except Exception as e:
+                results_ch.append(
+                    {
+                        "Tipo de Classificação": cls_type_ch,
+                        "Calinski-Harabasz Score": "Erro",
+                        "Observações": f"Erro inesperado: {e}",
+                    }
+                )
+
+        if results_ch:
+            st.dataframe(pd.DataFrame(results_ch))
+        else:
+            st.info("Nenhum resultado de Calinski-Harabasz Score gerado.")
+    # --- FIM NOVA Seção Calinski-Harabasz Score ---
 
     # As seções abaixo permanecem como estavam, dentro dos loops de c_type e cls
     for c_type in classification_types:
@@ -415,7 +664,9 @@ def main():
                     )
 
             if "Teste Qui-Quadrado" in selected_visualizations:
-                if selected_cat_features:
+                if (
+                    selected_cat_features
+                ):  # O teste Qui-Quadrado faz sentido para features categóricas
                     st.markdown("#### Teste Qui-Quadrado")
                     for feature in selected_cat_features:
                         st.markdown(
@@ -434,6 +685,7 @@ def main():
                         else:
                             contingency_table = contingency_table_full
 
+                        # Check for empty tables or tables with insufficient dimensions/zero cells
                         if (
                             contingency_table.empty
                             or contingency_table.shape[0] < 2
@@ -592,155 +844,6 @@ def main():
                         "Selecione uma feature numérica e uma feature categórica para realizar o Teste ANOVA."
                     )
             # --- FIM Teste ANOVA (Seleção Manual) ---
-
-            # --- Análise ANOVA Comparativa (Pré-definida) ---
-            if "Análise ANOVA Comparativa (Pré-definida)" in selected_visualizations:
-                st.markdown(
-                    "#### 📊 Análise ANOVA Comparativa (Variáveis Pré-definidas)"
-                )
-                st.write(
-                    "Resultados da ANOVA para a feature numérica selecionada, comparada com um conjunto fixo de variáveis classificatórias."
-                )
-
-                anova_comparative_num_feature_options = sorted(
-                    list(
-                        set(
-                            num_features
-                            + COLUNAS_NOTAS
-                            + [
-                                "NOTA_GERAL_COM_REDACAO",
-                                "NOTA_GERAL_SEM_REDACAO",
-                                "Q006",
-                                "Q022",
-                                "Q024",
-                                "Q008",
-                            ]
-                        )
-                    )
-                )
-
-                selected_anova_num_feature = st.selectbox(
-                    f"Selecione a Feature Numérica (dependente) para Análise ANOVA Comparativa na categoria '{cls}':",
-                    options=["Nenhuma"]
-                    + [
-                        f
-                        for f in anova_comparative_num_feature_options
-                        if f in df.columns and pd.api.types.is_numeric_dtype(df[f])
-                    ],
-                    key=f"anova_comparative_num_feature_{c_type}_{cls}",
-                )
-
-                if selected_anova_num_feature != "Nenhuma":
-                    results_list = []
-
-                    for cat_feat in ANOVA_PREDEFINED_CAT_FEATURES:
-                        if cat_feat not in df.columns:
-                            results_list.append(
-                                {
-                                    "Variável Classificatória": cat_feat,
-                                    "Valor F": "N/A",
-                                    "p-valor": "N/A",
-                                    "Associação Significativa (p < 0.05)": "Coluna não encontrada",
-                                    "Observações": "N/A",
-                                }
-                            )
-                            continue
-
-                        df_anova_comp = df_filtered[
-                            [selected_anova_num_feature, cat_feat]
-                        ].dropna()
-
-                        if df_anova_comp.empty:
-                            results_list.append(
-                                {
-                                    "Variável Classificatória": cat_feat,
-                                    "Valor F": "N/A",
-                                    "p-valor": "N/A",
-                                    "Associação Significativa (p < 0.05)": "Dados Insuficientes",
-                                    "Observações": "Não há dados após filtrar NaNs para esta combinação.",
-                                }
-                            )
-                            continue
-
-                        try:
-                            groups = [
-                                df_anova_comp[selected_anova_num_feature][
-                                    df_anova_comp[cat_feat] == category
-                                ].dropna()
-                                for category in df_anova_comp[cat_feat].unique()
-                            ]
-
-                            valid_groups = [
-                                g for g in groups if g.count() > 1
-                            ]  # Groups must have at least 2 observations
-
-                            if len(valid_groups) < 2:
-                                results_list.append(
-                                    {
-                                        "Variável Classificatória": cat_feat,
-                                        "Valor F": "N/A",
-                                        "p-valor": "N/A",
-                                        "Associação Significativa (p < 0.05)": "Grupos Insuficientes",
-                                        "Observações": "Menos de 2 grupos com dados suficientes para ANOVA.",
-                                    }
-                                )
-                            else:
-                                f_statistic, p_value = f_oneway(*valid_groups)
-
-                                is_significant = "Sim" if p_value < 0.05 else "Não"
-                                # Apenas para referência, o cálculo da média por grupo pode ser custoso para muitas categorias
-                                # e já é feito na seção de Estatísticas Agrupadas.
-                                # Por simplicidade aqui, vamos apenas indicar a significância.
-                                obs = f"Média(s) dos grupos em '{selected_anova_num_feature}' variam."
-                                # Para ver as médias, o usuário pode ir na seção de estatísticas agrupadas
-
-                                results_list.append(
-                                    {
-                                        "Variável Classificatória": cat_feat,
-                                        "Valor F": f"{f_statistic:.2f}",
-                                        "p-valor": f"{p_value:.5f}",
-                                        "Associação Significativa (p < 0.05)": is_significant,
-                                        "Observações": obs,
-                                    }
-                                )
-
-                        except ValueError as ve:
-                            results_list.append(
-                                {
-                                    "Variável Classificatória": cat_feat,
-                                    "Valor F": "Erro",
-                                    "p-valor": "Erro",
-                                    "Associação Significativa (p < 0.05)": "Erro",
-                                    "Observações": f"Erro de cálculo: {ve}",
-                                }
-                            )
-                        except Exception as e:
-                            results_list.append(
-                                {
-                                    "Variável Classificatória": cat_feat,
-                                    "Valor F": "Erro",
-                                    "p-valor": "Erro",
-                                    "Associação Significativa (p < 0.05)": "Erro",
-                                    "Observações": f"Erro inesperado: {e}",
-                                }
-                            )
-
-                    if results_list:
-                        st.dataframe(
-                            pd.DataFrame(results_list).set_index(
-                                "Variável Classificatória"
-                            )
-                        )
-                    else:
-                        st.info(
-                            "Nenhum resultado de ANOVA gerado para as variáveis pré-definidas."
-                        )
-                else:
-                    st.info(
-                        "Selecione uma Feature Numérica para iniciar a Análise ANOVA Comparativa."
-                    )
-
-            # --- FIM Análise ANOVA Comparativa (Pré-definida) ---
 
             if "Plots: Features Numéricas" in selected_visualizations:
                 if selected_num_features:
