@@ -1,35 +1,54 @@
 import numpy as np
 import pandas as pd
 import os
-from toolz import pipe
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.cluster import MiniBatchKMeans
 
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
-from scipy.cluster.hierarchy import dendrogram, linkage
 
-import matplotlib.pyplot as plt
+# ==============================================================================
+# SEÇÃO DE CONFIGURAÇÃO
+# ==============================================================================
 
-# Importar as funções de clustering do novo módulo
-from preprocess.clustering.clustering_models import (
-    classificar_com_agrupamento_hierarquico,
-    classificar_com_dbscan,
-    classificar_com_birch,
+# 1. Anos dos dados do ENEM a serem carregados e processados.
+ANOS_PARA_CARREGAR = ["2023", "2022", "2021"]
+
+# 2. Caminho base para os arquivos de dados. Use '{ano}' como um placeholder.
+CAMINHO_BASE_DADOS = (
+    "./preprocess/generico/microdados_enem_{ano}/DADOS/MICRODADOS_ENEM_{ano}.csv"
 )
 
+# 3. Caminho para salvar o arquivo de saída pré-processado.
+# Este será o prefixo; o número de clusters será adicionado.
+CAMINHO_SAIDA_PREFIXO = (
+    "./preprocess/generico/microdados_enem_combinado/PREPROCESS/PREPROCESSED_DATA_2M"
+)
 
-"""
-Esse script tem como objetivo realizar o pré-processamento dos microdados do Enem 2023.
-O pré-processamento consiste em:
-1. Carregar os microdados do Enem 2023 (./microdados_enem_2023/DADOS/MICRODADOS_ENEM_2023.csv).
-2. Selecionar todas as colunas do CSV (padrão).
-3. Remover valores inválidos (nulos, ausentes, etc).
-4. Criar novas colunas a partir das colunas existentes.
-5. Salvar os dados pré-processados em um arquivo CSV (./microdados_enem_2023/PREPROCESS/PREPROCESSED_DATA.csv).
-"""
+# 4. Percentual de amostragem a ser aplicado (1.0 para 100%, 0.1 para 10%).
+PERCENTUAL_AMOSTRAGEM = 1
 
-anos_para_carregar = ["2021", "2022", "2023"]
+# 5. Lista de colunas que devem ser selecionadas do dataset original.
+# Apenas estas colunas serão carregadas na memória após a seleção.
+COLUNAS_SELECIONADAS = [
+    "TP_SEXO",
+    "TP_COR_RACA",
+    "TP_ESCOLA",
+    "TP_LINGUA",
+    "TP_DEPENDENCIA_ADM_ESC",
+    "Q006",
+    "NU_NOTA_CN",
+    "NU_NOTA_CH",
+    "NU_NOTA_LC",
+    "NU_NOTA_MT",
+    "NU_NOTA_REDACAO",
+    "IN_TREINEIRO",  # Adicionada coluna de treineiro
+    "TP_PRESENCA_CN",  # Adicionada presença na prova de Ciências da Natureza
+    "TP_PRESENCA_CH",  # Adicionada presença na prova de Ciências Humanas
+    "TP_PRESENCA_LC",  # Adicionada presença na prova de Linguagens e Códigos
+    "TP_PRESENCA_MT",  # Adicionada presença na prova de Matemática
+]
 
-colunas_notas = [
+# 6. Colunas de notas usadas para calcular a média e verificar valores zerados.
+COLUNAS_DE_NOTAS = [
     "NU_NOTA_CN",
     "NU_NOTA_CH",
     "NU_NOTA_LC",
@@ -37,481 +56,571 @@ colunas_notas = [
     "NU_NOTA_REDACAO",
 ]
 
-# Dicionário de mapeamento para variáveis categóricas
-mapeamento_categorias = {
-    "TP_FAIXA_ETARIA": {
-        "1": 16.5,  # Menor de 17 anos (estimativa)
-        "2": 17,
-        "3": 18,
-        "4": 19,
-        "5": 20,
-        "6": 21,
-        "7": 22,
-        "8": 23,
-        "9": 24,
-        "10": 25,
-        "11": 28,  # Entre 26 e 30 anos (midpoint)
-        "12": 33,  # Entre 31 e 35 anos (midpoint)
-        "13": 38,  # Entre 36 e 40 anos (midpoint)
-        "14": 43,  # Entre 41 e 45 anos (midpoint)
-        "15": 48,  # Entre 46 e 50 anos (midpoint)
-        "16": 53,  # Entre 51 e 55 anos (midpoint)
-        "17": 58,  # Entre 56 e 60 anos (midpoint)
-        "18": 63,  # Entre 61 e 65 anos (midpoint)
-        "19": 68,  # Entre 66 e 70 anos (midpoint)
-        "20": 70.5,  # Maior de 70 anos (estimativa)
-    },
-    "TP_SEXO": {"M": 0, "F": 1},
-    "TP_ESTADO_CIVIL": {
-        "0": 0,
-        "1": 1,
-        "2": 2,
-        "3": 3,
-        "4": 4,
-    },
-    "TP_COR_RACA": {
-        "0": 0,
-        "1": 1,
-        "2": 2,
-        "3": 3,
-        "4": 4,
-        "5": 5,
-        "6": 6,
-    },
-    "TP_NACIONALIDADE": {
-        "0": 0,
-        "1": 1,
-        "2": 2,
-        "3": 3,
-        "4": 4,
-    },
-    "TP_ST_CONCLUSAO": {
-        "1": 1,
-        "2": 2,
-        "3": 3,
-        "4": 4,
-    },
-    "TP_ANO_CONCLUIU": {
-        "0": 0,
-        "1": 2022,
-        "2": 2021,
-        "3": 2020,
-        "4": 2019,
-        "5": 2018,
-        "6": 2017,
-        "7": 2016,
-        "8": 2015,
-        "9": 2014,
-        "10": 2013,
-        "11": 2012,
-        "12": 2011,
-        "13": 2010,
-        "14": 2009,
-        "15": 2008,
-        "16": 2007,
-        "17": 2006.5,  # Antes de 2007 (estimativa)
-    },
-    "TP_ESCOLA": {"1": 1, "2": 2, "3": 3},
-    "TP_ENSINO": {"1": 1, "2": 2},
-    "IN_TREINEIRO": {"0": 0, "1": 1},
-    "TP_DEPENDENCIA_ADM_ESC": {"1": 1, "2": 2, "3": 3, "4": 4},
-    "TP_LOCALIZACAO_ESC": {"1": 1, "2": 2},
-    "TP_SIT_FUNC_ESC": {"1": 1, "2": 2, "3": 3, "4": 4},
-    "TP_PRESENCA_CN": {"0": 0, "1": 1, "2": 2},
-    "TP_PRESENCA_CH": {"0": 0, "1": 1, "2": 2},
-    "TP_PRESENCA_LC": {"0": 0, "1": 1, "2": 2},
-    "TP_PRESENCA_MT": {"0": 0, "1": 1, "2": 2},
-    "TP_LINGUA": {"0": 0, "1": 1},
-    "TP_STATUS_REDACAO": {
-        "1": 1,
-        "2": 2,
-        "3": 3,
-        "4": 4,
-        "6": 6,
-        "7": 7,
-        "8": 8,
-        "9": 9,
-    },
-    "Q001": {
-        "A": 0,
-        "B": 3,  # Não completou a 4ª série/5º ano (midpoint de 1-4)
-        "C": 6.5,  # Completou a 4ª série/5º ano, mas não completou a 8ª série/9º ano (midpoint de 5-8)
-        "D": 10.5,  # Completou a 8ª série/9º ano, mas não completou o Ensino Médio (midpoint de 9-12)
-        "E": 14,  # Completou o Ensino Médio, mas não completou a Faculdade (12 + 2 anos de faculdade estimados)
-        "F": 18,  # Completou a Faculdade, mas não completou a Pós-graduação (16 + 2 anos de pós estimados)
-        "G": 20,  # Completou a Pós-graduação (18 + 2 anos de pós estimados)
-        "H": np.nan,  # Não sei
-    },
-    "Q002": {
-        "A": 0,
-        "B": 3,
-        "C": 6.5,
-        "D": 10.5,
-        "E": 14,
-        "F": 18,
-        "G": 20,
-        "H": np.nan,
-    },
-    "Q003": {
-        "A": 1,
-        "B": 2,
-        "C": 3,
-        "D": 4,
-        "E": 5,
-        "F": np.nan,  # Não sei
-    },
-    "Q004": {
-        "A": 1,
-        "B": 2,
-        "C": 3,
-        "D": 4,
-        "E": 5,
-        "F": np.nan,
-    },
-    "Q005": {
-        "1": 1,
-        "2": 2,
-        "3": 3,
-        "4": 4,
-        "5": 5,
-        "6": 6,
-        "7": 7,
-        "8": 8,
-        "9": 9,
-        "10": 10,
-        "11": 11,
-        "12": 12,
-        "13": 13,
-        "14": 14,
-        "15": 15,
-        "16": 16,
-        "17": 17,
-        "18": 18,
-        "19": 19,
-        "20": 20,
-    },
+# 7. Mapeamento para preenchimento de valores ausentes (NaN).
+# Formato: {'NOME_DA_COLUNA': valor_de_preenchimento}
+MAPEAMENTO_PREENCHIMENTO_NA = {
+    # Exemplo: Preencher notas ausentes com 0, se desejado.
+    "TP_DEPENDENCIA_ADM_ESC": 0,
+    "NU_NOTA_CN": 0,
+    "NU_NOTA_CH": 0,
+    "NU_NOTA_LC": 0,
+    "NU_NOTA_MT": 0,
+    "NU_NOTA_REDACAO": 0,
+}
+
+# 8. Mapeamento para converter colunas de texto para números. (NOVA CONFIGURAÇÃO)
+# Formato: {'NOME_DA_COLUNA': {'valor_texto_1': valor_num_1, ...}}
+MAPEAMENTO_CATEGORICO_PARA_NUMERICO = {
+    "TP_SEXO": {"F": 0, "M": 1},
+    # Mapeamento da Renda Mensal (Questão 006) - Usando a média de cada faixa
     "Q006": {
-        "A": 0,  # Nenhuma Renda
-        "B": 660.00,  # Até R$ 1.320,00 (midpoint)
-        "C": 1650.00,  # De R$ 1.320,01 até R$ 1.980,00 (midpoint)
-        "D": 2310.50,  # De R$ 1.980,01 até R$ 2.640,00 (midpoint)
-        "E": 2970.50,  # De R$ 2.640,01 até R$ 3.300,00 (midpoint)
-        "F": 3630.50,  # De R$ 3.300,01 até R$ 3.960,00 (midpoint)
-        "G": 4620.50,  # De R$ 3.960,01 até R$ 5.280,00 (midpoint)
-        "H": 5940.50,  # De R$ 5.280,01 até R$ 6.600,00 (midpoint)
-        "I": 7260.50,  # De R$ 6.600,01 até R$ 7.920,00 (midpoint)
-        "J": 8580.50,  # De R$ 7.920,01 até R$ 9240,00 (midpoint)
-        "K": 9900.50,  # De R$ 9.240,01 até R$ 10.560,00 (midpoint)
-        "L": 11220.50,  # De R$ 10.560,01 até R$ 11.880,00 (midpoint)
-        "M": 12540.50,  # De R$ 11.880,01 até R$ 13.200,00 (midpoint)
-        "N": 14520.50,  # De R$ 13.200,01 até R$ 15.840,00 (midpoint)
-        "O": 17820.50,  # De R$ 15.840,01 até R$19.800,00 (midpoint)
-        "P": 23100.50,  # De R$ 19.800,01 até R$ 26.400,00 (midpoint)
-        "Q": 27000.00,  # Acima de R$ 26.400,00 (estimativa)
+        "A": 0.00,  # Nenhuma Renda
+        "B": 606.00,  # Média de 0 a 1212.00
+        "C": 1515.01,  # Média de 1212.01 a 1818.00
+        "D": 2121.01,  # Média de 1818.01 a 2424.00
+        "E": 2727.01,  # Média de 2424.01 a 3030.00
+        "F": 3333.01,  # Média de 3030.01 a 3636.00
+        "G": 4242.01,  # Média de 3636.01 a 4848.00
+        "H": 5454.01,  # Média de 4848.01 a 6060.00
+        "I": 6666.01,  # Média de 6060.01 a 7272.00
+        "J": 7878.01,  # Média de 7272.01 a 8484.00
+        "K": 9090.01,  # Média de 8484.01 a 9696.00
+        "L": 10302.01,  # Média de 9696.01 a 10908.00
+        "M": 11514.01,  # Média de 10908.01 a 12120.00
+        "N": 13332.01,  # Média de 12120.01 a 14544.00
+        "O": 16362.01,  # Média de 14544.01 a 18180.00
+        "P": 21210.01,  # Média de 18180.01 a 24240.00
+        "Q": 24240.01,  # Limite inferior da faixa aberta
     },
-    "Q007": {"A": 0, "B": 1, "C": 2, "D": 3},
-    "Q008": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q009": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q010": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q011": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q012": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q013": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q014": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q015": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q016": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q017": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q018": {"A": 0, "B": 1},
-    "Q019": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q020": {"A": 0, "B": 1},
-    "Q021": {"A": 0, "B": 1},
-    "Q022": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q023": {"A": 0, "B": 1},
-    "Q024": {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4},
-    "Q025": {"A": 0, "B": 1},
+    # Mapeamento da Quantidade de Banheiros (Questão 008)
+    "Q008": {
+        "A": 0,  # Não
+        "B": 1,  # Sim, um
+        "C": 2,  # Sim, dois
+        "D": 3,  # Sim, três
+        "E": 4,  # Sim, quatro ou mais
+    },
+    # Mapeamento da Quantidade de Celulares (Questão 022)
+    "Q022": {
+        "A": 0,  # Não
+        "B": 1,  # Sim, um
+        "C": 2,  # Sim, dois
+        "D": 3,  # Sim, três
+        "E": 4,  # Sim, quatro ou mais
+    },
+    # Mapeamento da Quantidade de Computadores (Questão 024)
+    "Q024": {
+        "A": 0,  # Não
+        "B": 1,  # Sim, um
+        "C": 2,  # Sim, dois
+        "D": 3,  # Sim, três
+        "E": 4,  # Sim, quatro ou mais
+    },
 }
 
 
-def carregar_arquivo(caminho: str) -> pd.DataFrame:
-    """
-    Carrega um arquivo CSV em um DataFrame do Pandas.
-    """
-    try:
-        df = pd.read_csv(
-            caminho, delimiter=";", encoding="latin-1", skipinitialspace=True
-        )
-        df.columns = df.columns.str.strip()
-        return df
-    except FileNotFoundError:
-        print(f"Erro: Arquivo não encontrado em {caminho}")
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"Erro ao carregar o arquivo {caminho}: {e}")
-        return pd.DataFrame()
+# ==============================================================================
+# FUNÇÕES DE PRÉ-PROCESSAMENTO
+# ==============================================================================
 
 
-def pegar_colunas_de_interresse(df: pd.DataFrame, colunas: list = None) -> pd.DataFrame:
-    """
-    Seleciona apenas as colunas de interesse de um DataFrame.
-    Se nenhuma coluna for especificada, todas as colunas serão selecionadas.
-    """
-    if colunas is None:
-        return df.copy()
-    else:
-        colunas_existentes = [col for col in colunas if col in df.columns]
-        return df[colunas_existentes].copy()
-
-
-def remover_colunas_especificas(
-    df: pd.DataFrame, colunas_para_remover: list
+def carregar_dados(
+    anos: list,
+    caminho_base: str,
+    colunas_selecionadas_para_contagem: list,
+    mapeamento_categorico_para_numerico: dict,
 ) -> pd.DataFrame:
     """
-    Remove colunas específicas de um DataFrame.
+    Carrega, combina e retorna os dataframes do ENEM para os anos especificados.
+    Após o carregamento e combinação, mostra a contagem inicial de valores para
+    as colunas selecionadas, incluindo o valor original e o valor convertido (se aplicável).
     """
-    df_copy = df.copy()
-    existing_columns_to_drop = [
-        col for col in colunas_para_remover if col in df_copy.columns
-    ]
-    return df_copy.drop(columns=existing_columns_to_drop)
-
-
-def remover_linhas_com_valores_invalidos(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove linhas com quaisquer valores nulos (NaN) de um DataFrame.
-    Pandas handle various representations of missing data as NaN.
-    """
-    return df.dropna().copy()
-
-
-def remover_linhas_com_notas_zeradas(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove linhas onde qualquer uma das notas é zero.
-    Converte as colunas de nota para numérico antes de verificar.
-    """
-    copia_df = df.copy()
-    for col in colunas_notas:
-        if col in copia_df.columns:
-            copia_df[col] = pd.to_numeric(
-                copia_df[col].astype(str).str.replace(",", "."), errors="coerce"
+    todos_os_dfs = []
+    print("Iniciando carregamento dos arquivos...")
+    for ano in anos:
+        caminho_arquivo = caminho_base.format(ano=ano)
+        try:
+            df = pd.read_csv(
+                caminho_arquivo,
+                delimiter=";",
+                encoding="latin-1",
+                skipinitialspace=True,
             )
+            df.columns = df.columns.str.strip()
+            todos_os_dfs.append(df)
+            print(f"   - Arquivo de {ano} carregado com sucesso ({len(df)} linhas).")
+        except FileNotFoundError:
+            print(f"ERRO: Arquivo não encontrado em {caminho_arquivo}")
+        except Exception as e:
+            print(f"ERRO ao carregar o arquivo {caminho_arquivo}: {e}")
 
-    for col in colunas_notas:
-        if col in copia_df.columns:
-            copia_df = copia_df[copia_df[col].notna() & (copia_df[col] > 0)]
+    if not todos_os_dfs:
+        print("Nenhum arquivo de dados foi carregado. Encerrando.")
+        return pd.DataFrame()
 
-    return copia_df
+    df_combinado = pd.concat(todos_os_dfs, ignore_index=True, sort=False)
+    print(f"Total de linhas combinadas: {len(df_combinado)}")
 
+    print("\n[Contagem Inicial de Valores por Coluna Selecionada]")
+    for col in colunas_selecionadas_para_contagem:
+        if col in df_combinado.columns:
+            print(f"\n--- Coluna: {col} ---")
+            if col in mapeamento_categorico_para_numerico:
+                # Get the mapping for the current column
+                col_map = mapeamento_categorico_para_numerico[col]
 
-def converter_opcoes_letra_para_numero(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Converte colunas com opções de letra e classificações para números,
-    utilizando o dicionário de mapeamento global `mapeamento_categorias`.
-    Para faixas numéricas, converte para o ponto médio.
-    """
-    copia_df = df.copy()
+                # Get counts of original values including NaNs
+                original_counts = df_combinado[col].value_counts(dropna=False)
 
-    for col, mapping in mapeamento_categorias.items():
-        if col in copia_df.columns and pd.api.types.is_string_dtype(copia_df[col]):
-            # Use .loc to avoid SettingWithCopyWarning
-            copia_df.loc[:, col] = copia_df[col].map(mapping).fillna(copia_df[col])
-            copia_df.loc[:, col] = pd.to_numeric(copia_df[col], errors="coerce")
-        elif col in copia_df.columns and pd.api.types.is_numeric_dtype(copia_df[col]):
-            # Handle numeric columns that might have categorical meaning (e.g., TP_FAIXA_ETARIA)
-            # Ensure they are mapped if specified in the dictionary
-            copia_df.loc[:, col] = (
-                copia_df[col].astype(str).map(mapping).fillna(copia_df[col])
-            )
-            copia_df.loc[:, col] = pd.to_numeric(copia_df[col], errors="coerce")
+                # Iterate through these counts to display original/converted/count
+                for original_val, count in original_counts.items():
+                    # Check if the original_val is NaN
+                    if pd.isna(original_val):
+                        converted_val_str = "NaN"  # Represent NaN as string "NaN"
+                    # Check if the original_val is in the mapping to convert it
+                    elif original_val in col_map:
+                        converted_val_str = str(col_map[original_val])
+                    else:
+                        # If an original value exists but is not in the mapping, keep its original string representation
+                        converted_val_str = "Não Mapeado"
 
-    # Handle CLASSIFICACAO_NOTA_GERAL_COM_REDACAO and CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO if they exist
-    colunas_classificacao = [
-        "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO",
-        "CLASSIFICACAO_NOTA_GERAL_SEM_REDACAO",
-    ]
-    for col in colunas_classificacao:
-        if col in copia_df.columns and pd.api.types.is_string_dtype(copia_df[col]):
-            copia_df.loc[:, col] = copia_df[col].apply(
-                lambda x: (
-                    str(ord(x.upper()) - ord("A"))
-                    if isinstance(x, str) and len(x) == 1 and x.isalpha()
-                    else x
-                )
-            )
-            copia_df.loc[:, col] = pd.to_numeric(copia_df[col], errors="coerce")
-
-    return copia_df
-
-
-def criar_novas_colunas(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Cria as colunas de nota geral com e sem redação.
-    """
-    copia_df = df.copy()
-    for col in colunas_notas:
-        if col in copia_df.columns:
-            copia_df[col] = pd.to_numeric(copia_df[col], errors="coerce")
-
-    copia_df.dropna(
-        subset=[col for col in colunas_notas if col in copia_df.columns], inplace=True
-    )
-
-    if not copia_df.empty:
-        existing_colunas_notas = [
-            col for col in colunas_notas if col in copia_df.columns
-        ]
-        if existing_colunas_notas:
-            copia_df["NOTA_GERAL_COM_REDACAO"] = (
-                copia_df[existing_colunas_notas].mean(axis=1).round(2)
-            )
+                    print(f"   {original_val} / {converted_val_str}: {count}")
+            else:
+                # For numerical or non-mapped categorical columns, just print value_counts
+                print(df_combinado[col].value_counts(dropna=False))
         else:
-            copia_df["NOTA_GERAL_COM_REDACAO"] = np.nan
-
-        cols_sem_redacao = [
-            col for col in existing_colunas_notas if col != "NU_NOTA_REDACAO"
-        ]
-        if cols_sem_redacao:
-            copia_df["NOTA_GERAL_SEM_REDACAO"] = (
-                copia_df[cols_sem_redacao].mean(axis=1).round(2)
+            print(
+                f"--- AVISO: Coluna '{col}' não encontrada no DataFrame combinado para contagem inicial."
             )
-        else:
-            copia_df["NOTA_GERAL_SEM_REDACAO"] = np.nan
 
-    return copia_df
+    return df_combinado
 
 
-def plot_dendrogram(df: pd.DataFrame):
+def aplicar_amostragem(df: pd.DataFrame, percentual: float) -> pd.DataFrame:
     """
-    Gera e exibe o dendrograma para auxiliar na escolha do número de clusters.
+    Aplica amostragem sobre o DataFrame se o percentual for menor que 1.0.
     """
-    score_cols = ["NOTA_GERAL_COM_REDACAO", "NOTA_GERAL_SEM_REDACAO"]
-    df_for_clustering = df.dropna(subset=score_cols).copy()
+    if not 0 <= percentual <= 1:
+        raise ValueError("O percentual de amostragem deve estar entre 0 e 1.")
 
-    if df_for_clustering.empty:
-        print("Nenhum dado válido para gerar o dendrograma.")
-        return
+    linhas_antes = len(df)
+    print(f"\n[Amostragem] Entrando com {linhas_antes} linhas.")
 
-    # Gera a matriz de ligação
-    # Usando 'ward' linkage para minimizar a variância dentro de cada cluster
-    Z = linkage(df_for_clustering[score_cols], method="ward")
+    if percentual < 1.0:
+        print(f"Aplicando amostragem de {percentual:.2%} dos dados...")
+        df_amostrado = df.sample(frac=percentual, random_state=42).reset_index(
+            drop=True
+        )
+        linhas_depois = len(df_amostrado)
+        removidas = linhas_antes - linhas_depois
+        print(f"   - {removidas} linhas removidas pela amostragem.")
+        print(f"[Amostragem] Saindo com {linhas_depois} linhas.")
+        return df_amostrado
 
-    # Plota o dendrograma
-    plt.figure(figsize=(15, 7))
-    plt.title("Dendrograma para Agrupamento Hierárquico das Notas")
-    plt.xlabel("Número de Amostras ou (Índice da Amostra)")
-    plt.ylabel("Distância")
-    dendrogram(
-        Z,
-        leaf_rotation=90.0,  # Rotaciona os rótulos do eixo x
-        leaf_font_size=8.0,  # Tamanho da fonte para os rótulos do eixo x
-        truncate_mode="lastp",  # Mostra apenas os últimos p clusters mesclados
-        p=30,  # Mostra os últimos 30 clusters mesclados (ajuste conforme necessário)
-        show_leaf_counts=True,  # Mostra a contagem de folhas em cada nó
-        show_contracted=True,  # Mostra parênteses com contagem de folhas em nós contraídos
-    )
-    plt.grid(True)
-    plt.show()
+    print("   - Nenhuma amostragem aplicada (percentual é 100%).")
+    print(f"[Amostragem] Saindo com {linhas_antes} linhas.")
+    return df
 
 
-def normalizar_valores(df: pd.DataFrame) -> pd.DataFrame:
+def selecionar_colunas(df: pd.DataFrame, colunas: list) -> pd.DataFrame:
     """
-    Normaliza os valores numéricos usando MinMaxScaler do scikit-learn.
+    Seleciona apenas as colunas de interesse de um DataFrame.
     """
-    copia_df = df.copy()
-
-    numeric_cols = copia_df.select_dtypes(include=np.number).columns
-
-    if not numeric_cols.empty:
-        scaler = MinMaxScaler()
-        copia_df[numeric_cols] = scaler.fit_transform(copia_df[numeric_cols])
-        copia_df[numeric_cols] = copia_df[numeric_cols].round(2)
-
-    return copia_df
+    print(f"\n[Seleção de Colunas] Entrando com {len(df)} linhas.")
+    print("Selecionando colunas de interesse...")
+    colunas_existentes = [col for col in colunas if col in df.columns]
+    df_selecionado = df[colunas_existentes].copy()
+    print(f"[Seleção de Colunas] Saindo com {len(df_selecionado)} linhas.")
+    return df_selecionado
 
 
-def sample_dataframe(df: pd.DataFrame, percentage: float) -> pd.DataFrame:
+def converter_categorico_para_numerico(
+    df: pd.DataFrame, mapeamento: dict
+) -> pd.DataFrame:
     """
-    Aplica amostragem sobre o DataFrame.
-    `percentage` deve ser um valor entre 0 e 1.
+    Converte colunas categóricas (texto) para valores numéricos com base em um dicionário.
     """
-    if not 0 <= percentage <= 1:
-        raise ValueError("A porcentagem de amostragem deve estar entre 0 e 1.")
-
-    if df.empty:
-        print("DataFrame vazio, sem amostragem para aplicar.")
+    print(f"\n[Conversão Categórica] Entrando com {len(df)} linhas.")
+    if not mapeamento:
+        print("   - Nenhum mapeamento para conversão foi fornecido.")
+        print(f"[Conversão Categórica] Saindo com {len(df)} linhas.")
         return df
 
-    return df.sample(frac=percentage, random_state=42).reset_index(drop=True)
+    print("Convertendo colunas categóricas para numéricas...")
+    df_convertido = df.copy()
+    for coluna, mapa in mapeamento.items():
+        if coluna in df_convertido.columns:
+            df_convertido[coluna] = df_convertido[coluna].replace(mapa)
+            print(f"   - Coluna '{coluna}' convertida.")
+        else:
+            print(f"   - AVISO: Coluna '{coluna}' para conversão não encontrada.")
+
+    print(f"[Conversão Categórica] Saindo com {len(df_convertido)} linhas.")
+    return df_convertido
 
 
-def salvar_arquivo_preprocessado(df: pd.DataFrame, caminho: str):
+def preencher_valores_ausentes(
+    df: pd.DataFrame, mapa_preenchimento: dict
+) -> pd.DataFrame:
     """
-    Salva o DataFrame pré-processado em um arquivo CSV.
+    Preenche valores nulos (NaN) com base em um dicionário de mapeamento.
+    Detalha a quantidade de linhas que tiveram valores preenchidos.
+    """
+    linhas_antes = len(df)
+    print(f"\n[Preenchimento de Nulos] Entrando com {linhas_antes} linhas.")
+
+    if mapa_preenchimento:
+        print("Preenchendo valores ausentes...")
+
+        # Criar um DataFrame booleano indicando quais valores são NaN antes do preenchimento
+        nan_antes = df.isna()
+
+        df.fillna(value=mapa_preenchimento, inplace=True)
+
+        # Comparar o estado de NaN antes e depois para encontrar as células preenchidas
+        preenchidos_por_coluna = (nan_antes & ~df.isna()).sum()
+
+        total_celulas_preenchidas = preenchidos_por_coluna.sum()
+
+        # Contar o número de linhas que tiveram *pelo menos um* valor preenchido
+        linhas_com_preenchimento = (nan_antes & ~df.isna()).any(axis=1).sum()
+
+        if total_celulas_preenchidas > 0:
+            print(
+                f"   - {total_celulas_preenchidas} valores (células) foram preenchidos no total."
+            )
+            print(
+                f"   - {linhas_com_preenchimento} linhas tiveram pelo menos um valor preenchido."
+            )
+            print("   - Detalhe de valores preenchidos por coluna:")
+            for col, count in preenchidos_por_coluna.items():
+                if count > 0:
+                    print(f"     - '{col}': {count} valores")
+        else:
+            print(
+                "   - Nenhum valor ausente foi encontrado e preenchido com o mapeamento fornecido."
+            )
+    else:
+        print("   - Nenhum mapeamento para preenchimento de nulos foi fornecido.")
+
+    print(f"[Preenchimento de Nulos] Saindo com {len(df)} linhas.")
+    return df
+
+
+def remover_treineiros_e_ausentes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove linhas que correspondem a treineiros ou a alunos ausentes em qualquer uma das provas.
+    """
+    linhas_antes = len(df)
+    print(f"\n[Remoção de Treineiros e Ausentes] Entrando com {linhas_antes} linhas.")
+
+    df_filtrado = df.copy()
+
+    # Remover treineiros
+    if "IN_TREINEIRO" in df_filtrado.columns:
+        treineiros_removidos = df_filtrado[df_filtrado["IN_TREINEIRO"] == 1].shape[0]
+        df_filtrado = df_filtrado[df_filtrado["IN_TREINEIRO"] == 0]
+        print(f"   - {treineiros_removidos} linhas de treineiros removidas.")
+    else:
+        print(
+            "   - AVISO: Coluna 'IN_TREINEIRO' não encontrada para remoção de treineiros."
+        )
+
+    # Remover ausentes em qualquer uma das provas
+    colunas_presenca = [
+        "TP_PRESENCA_CN",
+        "TP_PRESENCA_CH",
+        "TP_PRESENCA_LC",
+        "TP_PRESENCA_MT",
+    ]
+
+    # Filtrar apenas as colunas de presença que realmente existem no DataFrame
+    colunas_presenca_existentes = [
+        col for col in colunas_presenca if col in df_filtrado.columns
+    ]
+
+    if colunas_presenca_existentes:
+        # 0 = Ausente, 1 = Presente, 2 = Eliminado
+        # Queremos manter apenas os presentes (1)
+        condicao_presenca = pd.Series(True, index=df_filtrado.index)
+        for col in colunas_presenca_existentes:
+            # Garante que a coluna é numérica para a comparação
+            df_filtrado[col] = pd.to_numeric(df_filtrado[col], errors="coerce")
+            # Um aluno é considerado ausente se TP_PRESENCA for 0 ou NaN (após coerce de não-numéricos)
+            # Queremos manter apenas os que são 1 (presentes)
+            condicao_presenca = condicao_presenca & (df_filtrado[col] == 1)
+
+        ausentes_removidos = df_filtrado[~condicao_presenca].shape[0]
+        df_filtrado = df_filtrado[condicao_presenca]
+        print(
+            f"   - {ausentes_removidos} linhas de ausentes em alguma prova removidas."
+        )
+    else:
+        print(
+            "   - AVISO: Nenhuma coluna de presença encontrada para remoção de ausentes."
+        )
+
+    linhas_depois = len(df_filtrado)
+    removidas_total = linhas_antes - linhas_depois
+    print(
+        f"   - Total de {removidas_total} linhas removidas (treineiros e/ou ausentes)."
+    )
+    print(f"[Remoção de Treineiros e Ausentes] Saindo com {linhas_depois} linhas.")
+
+    # Remover as colunas de presença após o filtro, se elas existirem
+    df_filtrado.drop(columns=colunas_presenca_existentes, errors="ignore", inplace=True)
+    print(f"   - Colunas de presença removidas: {colunas_presenca_existentes}")
+
+    # Remover a coluna IN_TREINEIRO após o filtro, se existir
+    if "IN_TREINEIRO" in df_filtrado.columns:
+        df_filtrado.drop(columns=["IN_TREINEIRO"], errors="ignore", inplace=True)
+        print(f"   - Coluna 'IN_TREINEIRO' removida.")
+
+    return df_filtrado
+
+
+def adicionar_nota_geral(df: pd.DataFrame, colunas_notas: list) -> pd.DataFrame:
+    """
+    Calcula e adiciona a coluna 'NOTA_GERAL' como a média das notas especificadas.
+    """
+    print(f"\n[Criação da Nota Geral] Entrando com {len(df)} linhas.")
+    print("Criando a coluna 'NOTA_GERAL'...")
+    df_com_nota = df.copy()
+    notas_existentes = [col for col in colunas_notas if col in df_com_nota.columns]
+    df_com_nota["NOTA_GERAL"] = df_com_nota[notas_existentes].mean(axis=1).round(2)
+    print(f"[Criação da Nota Geral] Saindo com {len(df_com_nota)} linhas.")
+    return df_com_nota
+
+
+def adicionar_classificacao(
+    df: pd.DataFrame, coluna_base: str, n_grupos: int
+) -> pd.DataFrame:
+    """
+    Cria uma classificação utilizando MiniBatch K-Means e a adiciona ao DataFrame original.
+    Os dados são escalados antes do agrupamento.
+    """
+    print(f"\n[Criação da Classificação] Entrando com {len(df)} linhas.")
+    print("Criando a coluna 'CLASSIFICACAO' com MiniBatch K-Means...")
+    df_final = df.copy()
+
+    # Seleciona apenas a coluna numérica para agrupamento
+    if coluna_base not in df_final.columns or not pd.api.types.is_numeric_dtype(
+        df_final[coluna_base]
+    ):
+        print(
+            f"ERRO: A coluna base '{coluna_base}' não é numérica ou não existe. Incapaz de agrupar."
+        )
+        df_final["CLASSIFICACAO"] = "Indefinida"
+        return df_final
+
+    # Escalamento dos dados: crucial para algoritmos baseados em distância como K-Means.
+    # MinMaxScaler é usado, mas considere StandardScaler se a distribuição dos dados
+    # for mais próxima de uma normal e você quiser que outliers não distorçam a escala.
+    print("   - Escalando a coluna base para agrupamento...")
+    scaler = MinMaxScaler()  # Você pode testar StandardScaler() aqui também
+    data_for_clustering = scaler.fit_transform(df_final[[coluna_base]])
+
+    # Inicializa e treina o modelo MiniBatch K-Means
+    print(f"   - Executando MiniBatch K-Means com {n_grupos} clusters...")
+    mbkmeans_model = MiniBatchKMeans(
+        n_clusters=n_grupos,
+        batch_size=256,  # Ajuste este valor conforme a memória e performance
+        random_state=42,
+        n_init="auto",
+    )
+
+    # As previsões serão usadas como a classificação
+    df_final["CLASSIFICACAO"] = mbkmeans_model.fit_predict(data_for_clustering)
+
+    # Opcional: Verificar o balanceamento dos clusters
+    unique_labels, counts = np.unique(df_final["CLASSIFICACAO"], return_counts=True)
+    print("\n   - Tamanho dos clusters finais (MiniBatch K-Means):")
+    for label, count in zip(unique_labels, counts):
+        print(
+            f"     - Cluster {label}: {count} pontos ({count/len(df_final)*100:.2f}%)"
+        )
+
+    print(f"[Criação da Classificação] Saindo com {len(df_final)} linhas.")
+    return df_final
+
+
+def salvar_dados(df: pd.DataFrame, caminho: str):
+    """
+    Salva o DataFrame final em um arquivo CSV.
     """
     if df.empty:
-        print("Nenhum dado para salvar.")
+        print("\nNenhum dado para salvar.")
         return
 
+    print(f"\nSalvando arquivo pré-processado em: {caminho}")
     os.makedirs(os.path.dirname(caminho), exist_ok=True)
-
     df.to_csv(caminho, sep=";", index=False, encoding="utf-8")
-    print(f"Arquivo salvo com sucesso em: {caminho}")
+    print("Arquivo salvo com sucesso!")
+
+
+def run_multiple_clusterings(
+    anos_para_carregar: list,
+    caminho_base_dados: str,
+    caminho_saida_prefixo: str,
+    percentual_amostragem: float,
+    colunas_selecionadas: list,
+    colunas_de_notas: list,
+    mapeamento_preenchimento_na: dict,
+    mapeamento_categorico_para_numerico: dict,
+    range_n_clusters: range,
+    coluna_base_classificacao: str = "NOTA_GERAL",
+):
+    """
+    Roda o pipeline de pré-processamento múltiplas vezes, variando o número de clusters,
+    e salva cada resultado em um arquivo separado.
+    """
+    print("\n--- INICIANDO EXECUÇÕES MÚLTIPLAS DE AGRUPAMENTO ---")
+
+    # Passo 1: Carregar os arquivos (feito apenas uma vez para todos os runs)
+    # df_bruto é o DataFrame original combinado de todos os anos
+    df_bruto = carregar_dados(
+        anos_para_carregar,
+        caminho_base_dados,
+        colunas_selecionadas,
+        mapeamento_categorico_para_numerico,
+    )  # Passando as colunas selecionadas e o mapeamento para a contagem
+    if df_bruto.empty:
+        print("Dados brutos não carregados. Encerrando execuções múltiplas.")
+        return
+
+    # A partir daqui, as etapas de pré-processamento (exceto a classificação)
+    # são executadas uma vez no DataFrame bruto para evitar reprocessamento desnecessário
+    # para cada variação de clusters.
+    print(
+        "\n--- Executando etapas de pré-processamento inicial (comum a todos os runs) ---"
+    )
+
+    # Passo 2: Aplicar amostragem configurável
+    df_amostrado = aplicar_amostragem(df_bruto, percentual_amostragem)
+
+    # Passo 3: Selecionar apenas as colunas desejadas
+    df_selecionado = selecionar_colunas(df_amostrado, colunas_selecionadas)
+
+    # Passo 4: Remover treineiros e ausentes
+    df_filtrado_treineiro_ausente = remover_treineiros_e_ausentes(df_selecionado)
+
+    # Passo 5: Preencher valores não definidos
+    df_preenchido = preencher_valores_ausentes(
+        df_filtrado_treineiro_ausente, mapeamento_preenchimento_na
+    )
+
+    # PASSO AJUSTADO: Converter colunas categóricas para numéricas AGORA (após preenchimento)
+    df_convertido = converter_categorico_para_numerico(
+        df_preenchido, mapeamento_categorico_para_numerico
+    )
+
+    # Passo 7: Criar a coluna de nota geral
+    df_base_para_cluster = adicionar_nota_geral(df_convertido, colunas_de_notas)
+
+    print(
+        "\n--- Etapas iniciais de pré-processamento concluídas. Iniciando agrupamentos. ---"
+    )
+
+    for num_clusters in range_n_clusters:
+        print(f"\n\n=========== EXECUTANDO PARA {num_clusters} CLUSTERS =============")
+
+        # Passo 8: Criar a coluna de classificação para o número atual de clusters
+        # Usamos uma cópia do df_base_para_cluster para não interferir nas próximas iterações
+        df_com_classificacao = adicionar_classificacao(
+            df_base_para_cluster.copy(), coluna_base_classificacao, num_clusters
+        )
+
+        # Atualizar o caminho de saída com o número de clusters
+        caminho_saida_atual = f"{caminho_saida_prefixo}_{num_clusters}C.csv"
+
+        # Passo 9: Salvar o arquivo final para esta iteração
+        salvar_dados(df_com_classificacao, caminho_saida_atual)
+
+        print(
+            f"=========== FIM DA EXECUÇÃO PARA {num_clusters} CLUSTERS ============\n"
+        )
+
+    print(
+        "\n--- TODAS AS EXECUÇÕES MÚLTIPLAS DE AGRUPAMENTO CONCLUÍDAS COM SUCESSO ---"
+    )
+
+
+# ==============================================================================
+# EXECUÇÃO PRINCIPAL
+# ==============================================================================
 
 
 def main():
-    # Caminhos para os arquivos de microdados do ENEM
-    caminho_base = (
-        "./preprocess/generico/microdados_enem_{ano}/DADOS/MICRODADOS_ENEM_{ano}.csv"
+    """
+    Orquestra o pipeline de pré-processamento de ponta a ponta.
+    """
+    print("--- INICIANDO SCRIPT DE PRÉ-PROCESSAMENTO DO ENEM ---")
+
+    # Você pode descomentar esta seção para rodar o pipeline para múltiplos clusters
+    # e comentar a seção "Execução única" abaixo.
+    # -------------------------------------------------------------------------
+    # Execução para Múltiplos Clusters (de 2 a 6)
+    # -------------------------------------------------------------------------
+    # run_multiple_clusterings(
+    #     anos_para_carregar=ANOS_PARA_CARREGAR,
+    #     caminho_base_dados=CAMINHO_BASE_DADOS,
+    #     caminho_saida_prefixo=CAMINHO_SAIDA_PREFIXO,
+    #     percentual_amostragem=PERCENTUAL_AMOSTRAGEM,
+    #     colunas_selecionadas=COLUNAS_SELECIONADAS,
+    #     colunas_de_notas=COLUNAS_DE_NOTAS,
+    #     mapeamento_preenchimento_na=MAPEAMENTO_PREENCHIMENTO_NA,
+    #     mapeamento_categorico_para_numerico=MAPEAMENTO_CATEGORICO_PARA_NUMERICO,
+    #     range_n_clusters=range(2, 7),  # Roda de 2 a 6 (o 7 não é incluído)
+    #     coluna_base_classificacao="NOTA_GERAL",
+    # )
+    # Fim da execução para múltiplos clusters.
+    # Se você quiser apenas esta execução, pode retornar aqui:
+    # return
+    # -------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
+    # Execução Única (Descomente esta seção se não usar a de múltiplos clusters)
+    # -------------------------------------------------------------------------
+    print("--- Execução de pipeline único ---")
+
+    # Passando as colunas selecionadas e o mapeamento para a contagem inicial
+    df_bruto = carregar_dados(
+        ANOS_PARA_CARREGAR,
+        CAMINHO_BASE_DADOS,
+        COLUNAS_SELECIONADAS,
+        MAPEAMENTO_CATEGORICO_PARA_NUMERICO,
     )
-    caminhos_dos_arquivos = [caminho_base.format(ano=ano) for ano in anos_para_carregar]
-
-    # Caminho de saída para o arquivo pré-processado
-    caminho_saida = "./preprocess/generico/microdados_enem_combinado/PREPROCESS/PREPROCESSED_DATA.csv"
-
-    # Porcentagem de amostragem (0.05 = 5% dos dados)
-    sampling_percentage = 1
-
-    # Carrega todos os arquivos de microdados
-    todos_os_arquivos = [carregar_arquivo(caminho) for caminho in caminhos_dos_arquivos]
-    todos_os_arquivos = [df for df in todos_os_arquivos if not df.empty]
-
-    if not todos_os_arquivos:
-        print("Nenhum arquivo de dados válido foi carregado. Saindo.")
+    if df_bruto.empty:
         return
 
-    # Concatena os DataFrames carregados
-    dataframe_combinado = pd.concat(todos_os_arquivos, ignore_index=True, sort=False)
+    df_amostrado = aplicar_amostragem(df_bruto, PERCENTUAL_AMOSTRAGEM)
+    df_selecionado = selecionar_colunas(df_amostrado, COLUNAS_SELECIONADAS)
+    df_filtrado_treineiro_ausente = remover_treineiros_e_ausentes(df_selecionado)
+    df_preenchido = preencher_valores_ausentes(
+        df_filtrado_treineiro_ausente, MAPEAMENTO_PREENCHIMENTO_NA
+    )
+    # PASSO AJUSTADO: Converter colunas categóricas para numéricas AGORA (após preenchimento)
+    df_convertido = converter_categorico_para_numerico(
+        df_preenchido, MAPEAMENTO_CATEGORICO_PARA_NUMERICO
+    )
+    df_com_nota = adicionar_nota_geral(df_convertido, COLUNAS_DE_NOTAS)
 
-    # Colunas a serem removidas do DataFrame
-    colunas_para_remover_exemplo = [
-        "NU_INSCRICAO",
-        "IN_TREINEIRO",
-        "NO_MUNICIPIO_ESC",
-        "NO_MUNICIPIO_PROVA",
-        "TX_RESPOSTAS_CN",
-        "TX_GABARITO_CN",
-        "TX_RESPOSTAS_CH",
-        "TX_GABARITO_CH",
-        "TX_RESPOSTAS_LC",
-        "TX_GABARITO_LC",
-        "TX_RESPOSTAS_MT",
-        "TX_GABARITO_MT",
-    ]
+    # Para a execução única, você precisa definir NUMERO_DE_GRUPOS_CLASSIFICACAO
+    # na seção de configuração no topo do arquivo.
+    df_final = adicionar_classificacao(df_com_nota, "NOTA_GERAL", 3)
 
-    # Pipeline de pré-processamento
-    processed_df = pipe(
-        dataframe_combinado,
-        pegar_colunas_de_interresse,
-        lambda df: remover_colunas_especificas(df, colunas_para_remover_exemplo),
-        remover_linhas_com_valores_invalidos,
-        remover_linhas_com_notas_zeradas,
-        converter_opcoes_letra_para_numero,  # Adicionado ao pipeline
-        lambda df: sample_dataframe(df, sampling_percentage),
-        criar_novas_colunas,
-        lambda df: classificar_com_birch(df, n_clusters=4),  # Usando a função importada
+    # Para a execução única, o caminho de saída precisa ser definido na config.
+    # Você pode definir CAMINHO_SAIDA = f"{CAMINHO_SAIDA_PREFIXO}_UNICO.csv" se quiser.
+    salvar_dados(
+        df_final,
+        "./preprocess/generico/microdados_enem_combinado/DADOS/PREPROCESSED_DATA.csv",
     )
 
-    # Salva o DataFrame pré-processado
-    salvar_arquivo_preprocessado(processed_df, caminho_saida)
-    print("Pré-processamento concluído com sucesso.")
+    print("\n--- PRÉ-PROCESSAMENTO CONCLUÍDO COM SUCESSO ---")
+    if not df_final.empty:
+        print(f"\nResumo do DataFrame Final ({len(df_final)} linhas):")
+        print(df_final.head())
+    # -------------------------------------------------------------------------
 
 
 if __name__ == "__main__":

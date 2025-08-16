@@ -109,6 +109,68 @@ def plot_categorical_feature(
     plt.close(fig)
 
 
+def plot_unified_categorical_feature(list_df_filtered, feature, selected_classes_names):
+    """
+    Plots the distribution of a categorical feature for a unified dataset
+    (concatenating multiple filtered dataframes), with percentage labels.
+    """
+    unified_df = pd.concat(list_df_filtered)
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    if not unified_df.empty and feature in unified_df.columns:
+        unified_counts = unified_df[feature].value_counts()
+        unified_percentages = (unified_counts / len(unified_df)) * 100
+        unified_df_plot = unified_percentages.reset_index()
+        unified_df_plot.columns = [feature, "Percentage"]
+
+        sns.barplot(
+            data=unified_df_plot,
+            x="Percentage",
+            y=feature,
+            ax=ax,
+            palette="viridis",
+            order=unified_counts.index,
+        )
+        ax.set_title(
+            f"Distribuição de {feature} para as classificações selecionadas ({', '.join(selected_classes_names)}) (%)",
+            fontsize=14,
+        )
+        ax.set_xlabel("Porcentagem", fontsize=12)
+        ax.set_ylabel(feature, fontsize=12)
+        ax.tick_params(axis="y", labelsize=10)
+        ax.tick_params(axis="x", labelsize=10)
+        ax.grid(axis="x", linestyle="--", alpha=0.7)
+
+        for index, row in unified_df_plot.iterrows():
+            ax.text(
+                row["Percentage"] + 0.5,
+                index,
+                f"{row['Percentage']:.1f}%",
+                color="black",
+                ha="left",
+                va="center",
+                fontsize=9,
+            )
+    else:
+        ax.set_title(f"Sem dados para {feature} nas classes selecionadas", fontsize=14)
+        ax.text(
+            0.5,
+            0.5,
+            "Dados insuficientes para plotar",
+            horizontalalignment="center",
+            verticalalignment="center",
+            transform=ax.transAxes,
+            fontsize=12,
+            color="gray",
+        )
+
+    plt.tight_layout()
+    st.pyplot(fig)
+
+    plt.close(fig)
+
+
 def plot_numerical_feature(
     df_original, df_filtered, feature, classification_type, selected_class, filters
 ):
@@ -154,6 +216,47 @@ def plot_numerical_feature(
             horizontalalignment="center",
             verticalalignment="center",
             transform=axes[1].transAxes,
+            fontsize=12,
+            color="gray",
+        )
+
+    plt.tight_layout()
+    st.pyplot(fig)
+
+    plt.close(fig)
+
+
+def plot_unified_numerical_feature(list_df_filtered, feature, selected_classes_names):
+    """
+    Plots the distribution (histogram and KDE) of a numerical feature
+    for a unified dataset (concatenating multiple filtered dataframes).
+    """
+    unified_df = pd.concat(list_df_filtered)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    if not unified_df.empty and feature in unified_df.columns:
+        sns.histplot(
+            unified_df[feature].dropna(), kde=True, ax=ax, color="purple", bins=30
+        )
+        ax.set_title(
+            f"Distribuição de {feature} para as classificações selecionadas ({', '.join(selected_classes_names)})",
+            fontsize=14,
+        )
+        ax.set_xlabel(feature, fontsize=12)
+        ax.set_ylabel("Densidade / Contagem", fontsize=12)
+        ax.tick_params(axis="x", labelsize=10)
+        ax.tick_params(axis="y", labelsize=10)
+        ax.grid(axis="y", linestyle="--", alpha=0.7)
+    else:
+        ax.set_title(f"Sem dados para {feature} nas classes selecionadas", fontsize=14)
+        ax.text(
+            0.5,
+            0.5,
+            "Dados insuficientes para plotar",
+            horizontalalignment="center",
+            verticalalignment="center",
+            transform=ax.transAxes,
             fontsize=12,
             color="gray",
         )
