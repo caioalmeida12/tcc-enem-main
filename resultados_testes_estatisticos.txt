@@ -1,0 +1,132 @@
+================================================================================
+         ANÁLISE ESTATÍSTICA AUTOMATIZADA COM DASK
+================================================================================
+
+--------------------------------------------------------------------------------
+ 1. Teste Qui-Quadrado (χ²): Associação entre Features Categóricas e 'CLASSIFICACAO'
+--------------------------------------------------------------------------------
+Hipótese Nula (H0): Não há associação entre a variável e a classificação (são independentes).
+Medida de Magnitude de Efeito: V de Cramér (0.1: pequeno, 0.3: médio, 0.5: grande).
+
+- TP_COR_RACA:
+   Estatística χ² = 380181.46, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   V de Cramér = 0.179 (Magnitude do Efeito)
+   Tabela de Contingência (amostra):
+CLASSIFICACAO          0          1         2
+TP_COR_RACA                                  
+0                37703.0    38488.0   21983.0
+1               587173.0  1094314.0  795633.0
+2               323975.0   318567.0   82854.0
+3              1079416.0  1070147.0  374763.0
+4                42448.0    42782.0   23254.0
+
+- TP_DEPENDENCIA_ADM_ESC:
+   Estatística χ² = 511392.43, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   V de Cramér = 0.207 (Magnitude do Efeito)
+   Tabela de Contingência (amostra):
+CLASSIFICACAO                 0        1       2
+TP_DEPENDENCIA_ADM_ESC                          
+0.0                     1431577  1704626  812332
+1.0                       15679    58902   54595
+2.0                      575628   553070  122379
+3.0                        6590     7608    2297
+4.0                       61212   250187  308648
+
+- TP_SEXO:
+   Estatística χ² = 17217.15, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   V de Cramér = 0.054 (Magnitude do Efeito)
+   Tabela de Contingência (amostra):
+CLASSIFICACAO        0        1       2
+TP_SEXO                                
+0              1334039  1543715  738857
+1               756647  1030678  561394
+
+- TP_LINGUA:
+   Estatística χ² = 450173.82, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   V de Cramér = 0.275 (Magnitude do Efeito)
+   Tabela de Contingência (amostra):
+CLASSIFICACAO        0        1       2
+TP_LINGUA                              
+0               828080  1458240  997167
+1              1262606  1116153  303084
+
+- TP_ESCOLA:
+   Estatística χ² = 478227.22, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   V de Cramér = 0.200 (Magnitude do Efeito)
+   Tabela de Contingência (amostra):
+CLASSIFICACAO        0        1       2
+TP_ESCOLA                              
+1              1049412  1333353  726579
+2               982063  1002403  273953
+3                59211   238637  299719
+
+
+--------------------------------------------------------------------------------
+ 2. Teste de Kruskal-Wallis: Comparação de Distribuições Numéricas por 'CLASSIFICACAO'
+--------------------------------------------------------------------------------
+Hipótese Nula (H0): A distribuição da variável é a mesma em todos os grupos de classificação.
+Medida de Magnitude de Efeito: Diferença de Medianas e Eta Quadrado H.
+
+- NOTA_GERAL:
+   Estatística H = 5167289.17, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   Medianas por Grupo:
+     CLASSIFICACAO '0': Mediana = 455.42, N = 2090686
+     CLASSIFICACAO '1': Mediana = 550.78, N = 2574393
+     CLASSIFICACAO '2': Mediana = 660.26, N = 1300251
+   Eta Quadrado H = 0.866 (Magnitude do Efeito)
+   (Recomendado: Visualizar boxplots ou distribuições para entender as diferenças)
+
+- NU_NOTA_CH:
+   Estatística H = 3563622.59, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   Medianas por Grupo:
+     CLASSIFICACAO '0': Mediana = 453.70, N = 2090686
+     CLASSIFICACAO '1': Mediana = 544.00, N = 2574393
+     CLASSIFICACAO '2': Mediana = 627.60, N = 1300251
+   Eta Quadrado H = 0.597 (Magnitude do Efeito)
+   (Recomendado: Visualizar boxplots ou distribuições para entender as diferenças)
+
+- NU_NOTA_CN:
+   Estatística H = 3017392.35, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   Medianas por Grupo:
+     CLASSIFICACAO '0': Mediana = 434.60, N = 2090686
+     CLASSIFICACAO '1': Mediana = 496.50, N = 2574393
+     CLASSIFICACAO '2': Mediana = 591.40, N = 1300251
+   Eta Quadrado H = 0.506 (Magnitude do Efeito)
+   (Recomendado: Visualizar boxplots ou distribuições para entender as diferenças)
+
+- NU_NOTA_LC:
+   Estatística H = 3442281.25, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   Medianas por Grupo:
+     CLASSIFICACAO '0': Mediana = 450.50, N = 2090686
+     CLASSIFICACAO '1': Mediana = 532.30, N = 2574393
+     CLASSIFICACAO '2': Mediana = 599.80, N = 1300251
+   Eta Quadrado H = 0.577 (Magnitude do Efeito)
+   (Recomendado: Visualizar boxplots ou distribuições para entender as diferenças)
+
+- NU_NOTA_MT:
+   Estatística H = 3466109.92, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   Medianas por Grupo:
+     CLASSIFICACAO '0': Mediana = 430.90, N = 2090686
+     CLASSIFICACAO '1': Mediana = 538.10, N = 2574393
+     CLASSIFICACAO '2': Mediana = 689.00, N = 1300251
+   Eta Quadrado H = 0.581 (Magnitude do Efeito)
+   (Recomendado: Visualizar boxplots ou distribuições para entender as diferenças)
+
+- NU_NOTA_REDACAO:
+   Estatística H = 3488281.59, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   Medianas por Grupo:
+     CLASSIFICACAO '0': Mediana = 500.00, N = 2090686 
+     CLASSIFICACAO '1': Mediana = 640.00, N = 2574393
+     CLASSIFICACAO '2': Mediana = 860.00, N = 1300251
+   Eta Quadrado H = 0.585 (Magnitude do Efeito)
+   (Recomendado: Visualizar boxplots ou distribuições para entender as diferenças)
+
+- Q006:
+   Estatística H = 1142328.08, p-valor = 0.00000 -> Significativo (Rejeita H0)
+   Medianas por Grupo:
+     CLASSIFICACAO '0': Mediana = 606.00, N = 2090685
+     CLASSIFICACAO '1': Mediana = 2121.01, N = 2574393
+     CLASSIFICACAO '2': Mediana = 4242.01, N = 1300251
+   Eta Quadrado H = 0.191 (Magnitude do Efeito)
+   (Recomendado: Visualizar boxplots ou distribuições para entender as diferenças)
+

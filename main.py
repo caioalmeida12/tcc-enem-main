@@ -2,47 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from scipy.stats import chi2_contingency
+from scipy.stats import chi2_contingency, f_oneway, kruskal
 
-# Importações dos módulos de análise
-from analysis.data_loader import load_preprocessed_data, identify_feature_types
-from analysis.feature_analyzer import (
-    display_chi_squared_test,
-    display_anova_test,
-    display_general_numerical_stats,
-    display_grouped_categorical_counts,
-    display_grouped_numerical_stats,
-    display_score_histogram,
-)
-from analysis.visualization import (
-    plot_categorical_feature,
-    plot_numerical_feature,
-    plot_comparative_categorical_distribution,
-    # Novos plots unificados
-    plot_unified_categorical_feature,
-    plot_unified_numerical_feature,
-)
-
-# Importações do módulo de avaliação de clusters
-from analysis.clustering_eval import (
-    evaluate_davies_bouldin,
-    evaluate_silhouette_score,
-    evaluate_calinski_harabasz_score,
-    display_elbow_curve,
-    display_davies_bouldin_comparison,
-    display_silhouette_comparison,
-    display_calinski_harabasz_comparison,
-)
-from utils import init_session_state
-
-# Configuração da página
-st.set_page_config(layout="wide", page_title="Análise ENEM - Classificações de Notas")
-
-# --- CONFIGURAÇÕES E CONSTANTES ---
-
-DATA_PATH = (
-    "./preprocess/generico/microdados_enem_combinado/PREPROCESS/PREPROCESSED_DATA.csv"
-)
 
 COLUNAS_NOTAS = [
     "NU_NOTA_CN",
@@ -51,346 +12,346 @@ COLUNAS_NOTAS = [
     "NU_NOTA_MT",
 ]
 
-FEATURES_FOR_CLUSTERING_EVAL = COLUNAS_NOTAS + ["NU_NOTA_REDACAO"]
 
-SILHOUETTE_SAMPLING_PERCENTAGE = 0.1
-MIN_SAMPLES_FOR_SAMPLING_SILHOUETTE = 100_000
+def display_score_histogram(df, classification_type, selected_classes):
+    """Exibe um histograma de notas empilhado por classificação."""
+    st.markdown("#### 📊 Histograma de Notas por Classificação")
 
+    score_options = COLUNAS_NOTAS + ["NU_NOTA_REDACAO", "NOTA_GERAL"]
+    if "NOTA_GERAL" in df.columns:
+        score_options.append("NOTA_GERAL")
 
-# --- APLICAÇÃO PRINCIPAL ---
-def main():
-    st.title(
-        "🔎 Análise de Correlação de Features com a Classificação de Notas do ENEM"
+    selected_score = st.selectbox(
+        "Selecione a nota para o histograma:",
+        options=score_options,
+        key=f"hist_score_selector_{classification_type}",
     )
+
+    df_plot = df[
+        df[classification_type].astype(str).isin(map(str, selected_classes))
+    ].copy()
+    df_plot[selected_score] = pd.to_numeric(df_plot[selected_score], errors="coerce")
+    df_plot.dropna(subset=[selected_score, classification_type], inplace=True)
+
+    if df_plot.empty:
+        st.warning(
+            f"Não há dados disponíveis para a nota '{selected_score}' com os filtros atuais."
+        )
+        return
+
+    min_score, max_score = df_plot[selected_score].min(), df_plot[selected_score].max()
+    bins = np.arange(0, max_score + 10, 10)
+    labels = [f"{int(i)}-{int(i+10)-1}" for i in bins[:-1]]
+
+    df_plot["faixa_nota"] = pd.cut(
+        df_plot[selected_score],
+        bins=bins,
+        labels=labels,
+        right=False,
+        include_lowest=True,
+    )
+    df_plot[classification_type] = df_plot[classification_type].astype("category")
+
+    fig = px.histogram(
+        df_plot,
+        x="faixa_nota",
+        color=classification_type,
+        barmode="stack",
+        title=f"Distribuição de '{selected_score}' por '{classification_type}'",
+        labels={
+            "faixa_nota": f"Faixa de Nota ({selected_score})",
+            "count": "Quantidade de Alunos",
+            classification_type: "Classificação",
+        },
+        category_orders={"faixa_nota": labels},
+    )
+
+    fig.update_layout(
+        xaxis_title=f"Faixa de Nota ({selected_score})",
+        yaxis_title="Quantidade de Alunos",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def display_chi_squared_test(
+    df, feature, c_type, selected_classes_input, selected_classes
+):
+    """Exibe os resultados do teste Qui-Quadrado para uma dada feature categórica."""
     st.markdown(
-        "Explore as **características socioeconômicas e de prova** associadas a cada grupo de desempenho no ENEM."
+        f"##### Teste Qui-Quadrado para '{feature}' vs. '{c_type.replace('_', ' ')}'"
     )
+
+    contingency_table_full = pd.crosstab(df[feature], df[c_type])
+
+    if "Todas" not in selected_classes_input and selected_classes:
+        valid_classes = [
+            c for c in selected_classes if c in contingency_table_full.columns
+        ]
+        if valid_classes:
+            contingency_table = contingency_table_full[valid_classes]
+        else:
+            st.warning(
+                f"Nenhuma das classes selecionadas {selected_classes} foi encontrada nos dados para o teste de '{feature}'."
+            )
+            return
+    else:
+        contingency_table = contingency_table_full
+
+    if (
+        contingency_table.empty
+        or contingency_table.shape[0] < 2
+        or contingency_table.shape[1] < 2
+    ):
+        st.info(
+            f"Dados insuficientes para o teste Qui-Quadrado de '{feature}'. São necessárias pelo menos 2 linhas e 2 colunas na tabela de contingência."
+        )
+        return
 
     try:
-        df = load_preprocessed_data(DATA_PATH)
-    except FileNotFoundError:
-        st.error(
-            f"Arquivo de dados não encontrado em: {DATA_PATH}. Verifique o caminho."
-        )
-        st.stop()
+        chi2, p_value, dof, expected = chi2_contingency(contingency_table)
+        st.write(f"**Valor Qui-Quadrado:** {chi2:.2f}")
+        st.write(f"**p-valor:** {p_value:.5f}")
+        st.write(f"**Graus de liberdade:** {dof}")
 
-    if df.empty:
-        st.error(
-            "Não foi possível carregar os dados. O arquivo pode estar vazio ou corrompido."
-        )
-        st.stop()
-
-    df, cat_features, num_features = identify_feature_types(df)
-    init_session_state(cat_features, num_features)
-
-    with st.sidebar:
-        st.header("Filtros e Opções")
-
-        possible_classification_cols = [
-            col
-            for col in ["CLASSIFICACAO", "CLASSIFICACAO_NOTA_GERAL_COM_REDACAO"]
-            if col in df.columns
-        ]
-
-        if not possible_classification_cols:
-            st.error(
-                "Nenhuma coluna de classificação encontrada. Verifique o pré-processamento."
+        if p_value < 0.05:
+            st.success(
+                f"Há uma associação estatisticamente significativa entre '{feature}' e a classificação (p < 0.05)."
             )
-            st.stop()
-
-        classification_types = st.multiselect(
-            "Tipo(s) de Classificação:",
-            possible_classification_cols,
-            default=st.session_state.get(
-                "classification_types_selected", [possible_classification_cols[0]]
-            ),
-            key="classification_types_widget",
-        )
-
-        if not classification_types:
-            st.warning("Selecione ao menos um tipo de classificação.")
-            st.stop()
-
-        all_classes = sorted(
-            set(
-                [
-                    val
-                    for c in classification_types
-                    for val in df[c].dropna().astype(str).unique()
-                ]
+        else:
+            st.info(
+                f"Não há evidência de associação estatisticamente significativa entre '{feature}' e a classificação (p >= 0.05)."
             )
-        )
-        display_classes = ["Todas"] + all_classes
-
-        selected_classes_input = st.multiselect(
-            "Filtrar por Categoria de Nota:",
-            display_classes,
-            default=st.session_state.get(
-                "selected_classifications_selected", ["Todas"]
-            ),
-            key="selected_classifications_widget",
-        )
-
-        selected_classes = (
-            all_classes if "Todas" in selected_classes_input else selected_classes_input
-        )
-
-        if not selected_classes:
-            st.warning("Selecione ao menos uma categoria de nota (ou 'Todas').")
-            st.stop()
-
-        selected_cat_features = st.multiselect(
-            "Analisar Features Categóricas:",
-            cat_features,
-            default=st.session_state.get("selected_categorical_features_selected", []),
-            key="selected_categorical_features_widget",
-        )
-
-        selected_num_features = st.multiselect(
-            "Analisar Features Numéricas:",
-            num_features,
-            default=st.session_state.get("selected_numerical_features_selected", []),
-            key="selected_numerical_features_widget",
-        )
-
-        visualization_options = [
-            "Histograma de Notas por Classificação",
-            "Curva de Cotovelo (Elbow Method)",
-            "Comparativo: Índice Davies-Bouldin",
-            "Comparativo: Silhouette Score",
-            "Comparativo: Índice Calinski-Harabasz",
-            "Comparação Categórica entre Categorias",
-            "Avaliação de Agrupamento (Métricas)",
-            "Teste Qui-Quadrado",
-            "Teste ANOVA (Seleção Manual)",
-            "Plots: Features Categóricas",
-            "Plots: Features Numéricas",
-            # Novas opções unificadas
-            "Plots: Features Categóricas Unificadas",
-            "Plots: Features Numéricas Unificadas",
-            "Estatísticas Gerais (Features Numéricas)",
-            "Estatísticas Agrupadas (Contagens)",
-            "Estatísticas Agrupadas (Médias/Medianas)",
-        ]
-
-        selected_visualizations = st.multiselect(
-            "Selecione as análises a exibir:",
-            options=visualization_options,
-            default=["Histograma de Notas por Classificação"],
-            key="visualization_selector",
-        )
-
-    current_filters = {
-        "classification_types": classification_types,
-        "selected_classes": selected_classes,
-        "selected_categorical_features": selected_cat_features,
-        "selected_numerical_features": selected_num_features,
-    }
-
-    # --- Lógica para criar a lista de dataframes para os plots unificados ---
-    list_of_filtered_dfs = []
-    if classification_types and selected_classes:
-        for cls in selected_classes:
-            df_cls = df[df[classification_types[0]].astype(str) == str(cls)].copy()
-            if not df_cls.empty:
-                list_of_filtered_dfs.append(df_cls)
-
-    # Seção de Análises Unificadas
-    if (
-        "Plots: Features Categóricas Unificadas" in selected_visualizations
-        and selected_cat_features
-    ):
-        st.header("Análise Unificada de Features Categóricas")
-        for feature in selected_cat_features:
-            plot_unified_categorical_feature(
-                list_of_filtered_dfs, feature, selected_classes
-            )
-
-    if (
-        "Plots: Features Numéricas Unificadas" in selected_visualizations
-        and selected_num_features
-    ):
-        st.header("Análise Unificada de Features Numéricas")
-        for feature in selected_num_features:
-            plot_unified_numerical_feature(
-                list_of_filtered_dfs, feature, selected_classes
-            )
-
-    # Seção de Análises Comparativas Gerais
-    if "Curva de Cotovelo (Elbow Method)" in selected_visualizations:
-        display_elbow_curve()
-        st.markdown("---")
-
-    if "Comparativo: Índice Davies-Bouldin" in selected_visualizations:
-        display_davies_bouldin_comparison()
-        st.markdown("---")
-
-    if "Comparativo: Silhouette Score" in selected_visualizations:
-        display_silhouette_comparison()
-        st.markdown("---")
-
-    if "Comparativo: Índice Calinski-Harabasz" in selected_visualizations:
-        display_calinski_harabasz_comparison()
-        st.markdown("---")
-
-    # Seção de Métricas Individuais
-    if "Avaliação de Agrupamento (Métricas)" in selected_visualizations:
-        st.header("Métricas de Avaliação do Agrupamento")
-        for c_type in classification_types:
-            with st.expander(f"Avaliação para: **{c_type}**"):
-                evaluate_davies_bouldin(df, FEATURES_FOR_CLUSTERING_EVAL, c_type)
-                evaluate_silhouette_score(
-                    df,
-                    FEATURES_FOR_CLUSTERING_EVAL,
-                    c_type,
-                    SILHOUETTE_SAMPLING_PERCENTAGE,
-                    MIN_SAMPLES_FOR_SAMPLING_SILHOUETTE,
+        st.markdown(f"**Tabela de Contingência (Observado):**")
+        st.dataframe(contingency_table)
+        with st.expander("Ver Valores Esperados"):
+            st.dataframe(
+                pd.DataFrame(
+                    expected,
+                    index=contingency_table.index,
+                    columns=contingency_table.columns,
                 )
-                evaluate_calinski_harabasz_score(
-                    df, FEATURES_FOR_CLUSTERING_EVAL, c_type
+            )
+    except ValueError as ve:
+        st.warning(
+            f"Não foi possível realizar o teste Qui-Quadrado para '{feature}'. Motivo: {ve}. Isso pode ocorrer se houver categorias com zero observações."
+        )
+
+
+def display_anova_test(
+    df_filtered, c_type, cls, cat_features, num_features, COLUNAS_NOTAS
+):
+    """Exibe os resultados do teste ANOVA baseado na seleção manual."""
+    anova_num_feature_options = sorted(
+        list(set(num_features + COLUNAS_NOTAS + ["NOTA_GERAL"]))
+    )
+
+    anova_num_feature = st.selectbox(
+        f"Selecione a Feature Numérica (dependente) para ANOVA na categoria '{cls}':",
+        options=["Nenhuma"]
+        + [
+            f
+            for f in anova_num_feature_options
+            if f in df_filtered.columns
+            and pd.api.types.is_numeric_dtype(df_filtered[f])
+        ],
+        key=f"anova_manual_num_feature_{c_type}_{cls}",
+    )
+
+    anova_cat_feature = st.selectbox(
+        f"Selecione a Feature Categórica (independente) para ANOVA na categoria '{cls}':",
+        options=["Nenhuma"] + [f for f in cat_features if f in df_filtered.columns],
+        key=f"anova_manual_cat_feature_{c_type}_{cls}",
+    )
+
+    if anova_num_feature != "Nenhuma" and anova_cat_feature != "Nenhuma":
+        st.markdown(
+            f"##### ANOVA para '{anova_num_feature}' agrupado por '{anova_cat_feature}'"
+        )
+
+        df_anova = df_filtered[[anova_num_feature, anova_cat_feature]].dropna()
+
+        if df_anova.empty or df_anova[anova_cat_feature].nunique() < 2:
+            st.warning(
+                "Não há dados suficientes ou grupos (mínimo 2) para realizar ANOVA com as seleções atuais."
+            )
+            return
+
+        try:
+            groups = [
+                df_anova[anova_num_feature][df_anova[anova_cat_feature] == category]
+                for category in df_anova[anova_cat_feature].unique()
+            ]
+
+            valid_groups = [g for g in groups if len(g) > 1]
+
+            if len(valid_groups) < 2:
+                st.warning(
+                    "São necessários pelo menos 2 grupos com mais de uma observação para realizar a ANOVA."
                 )
+                return
 
-    # Seção de Análise por Tipo de Classificação
-    for c_type in classification_types:
-        st.header(f"Análise para Classificação: **{c_type.replace('_', ' ').title()}**")
+            f_statistic, p_value = f_oneway(*valid_groups)
 
-        if "Histograma de Notas por Classificação" in selected_visualizations:
-            display_score_histogram(df, c_type, selected_classes)
-            st.markdown("---")
+            st.write(f"**F-Estatística:** {f_statistic:.2f}")
+            st.write(f"**p-valor:** {p_value:.5f}")
 
-        if "Comparação Categórica entre Categorias" in selected_visualizations:
-            if len(selected_classes) > 1 and selected_cat_features:
-                st.subheader("📊 Comparação Categórica entre as Categorias")
-                for feature in selected_cat_features:
-                    plot_comparative_categorical_distribution(
-                        df,
-                        feature,
-                        c_type,
-                        selected_classes,
-                        classification_types,
-                        selected_classes,
-                    )
+            if p_value < 0.05:
+                st.success(
+                    f"Há uma diferença estatisticamente significativa nas médias de '{anova_num_feature}' entre os grupos de '{anova_cat_feature}'."
+                )
             else:
                 st.info(
-                    "Para comparação, selecione múltiplas categorias de nota e ao menos uma feature categórica."
+                    f"Não há evidência de diferença significativa nas médias de '{anova_num_feature}' entre os grupos de '{anova_cat_feature}'."
                 )
 
-        if "Teste Qui-Quadrado" in selected_visualizations and selected_cat_features:
-            st.markdown("#### Teste Qui-Quadrado de Associação")
-            for feature in selected_cat_features:
-                display_chi_squared_test(
-                    df, feature, c_type, selected_classes_input, selected_classes
-                )
-            st.markdown("---")
+            st.markdown(f"**Estatísticas Descritivas por Grupo:**")
+            st.dataframe(
+                df_anova.groupby(anova_cat_feature)[anova_num_feature]
+                .agg(["count", "mean", "std"])
+                .reset_index()
+            )
 
-        for cls in selected_classes:
-            st.markdown(f"### 🎯 Detalhes para a Categoria de Nota: **'{cls}'**")
-            df_filtered = df[df[c_type].astype(str) == str(cls)].copy()
+        except ValueError as ve:
+            st.warning(f"Erro ao realizar ANOVA: {ve}.")
 
-            if df_filtered.empty:
-                st.write(f"Sem dados para a categoria '{cls}'.")
-                continue
 
-            # Garante que a NOTA_GERAL seja calculada para as estatísticas
-            cols_for_mean = [
-                col
-                for col in FEATURES_FOR_CLUSTERING_EVAL
-                if col in df_filtered.columns
+def display_kruskal_wallis_test(
+    df_filtered, c_type, cls, cat_features, num_features, COLUNAS_NOTAS
+):
+    """Exibe os resultados do teste de Kruskal-Wallis (alternativa não-paramétrica ao ANOVA)."""
+    st.markdown("#### 🔬 Teste de Kruskal-Wallis (Não-paramétrico)")
+    st.info(
+        "Use este teste para comparar as medianas de uma variável numérica entre dois ou mais grupos, "
+        "especialmente quando os dados não seguem uma distribuição normal."
+    )
+
+    kruskal_num_options = sorted(
+        list(set(num_features + COLUNAS_NOTAS + ["NOTA_GERAL"]))
+    )
+
+    kruskal_num_feature = st.selectbox(
+        f"Selecione a Feature Numérica (dependente) para Kruskal-Wallis na categoria '{cls}':",
+        options=["Nenhuma"]
+        + [
+            f
+            for f in kruskal_num_options
+            if f in df_filtered.columns
+            and pd.api.types.is_numeric_dtype(df_filtered[f])
+        ],
+        key=f"kruskal_manual_num_feature_{c_type}_{cls}",
+    )
+
+    kruskal_cat_feature = st.selectbox(
+        f"Selecione a Feature Categórica (independente) para Kruskal-Wallis na categoria '{cls}':",
+        options=["Nenhuma"] + [f for f in cat_features if f in df_filtered.columns],
+        key=f"kruskal_manual_cat_feature_{c_type}_{cls}",
+    )
+
+    if kruskal_num_feature != "Nenhuma" and kruskal_cat_feature != "Nenhuma":
+        st.markdown(
+            f"##### Kruskal-Wallis para '{kruskal_num_feature}' agrupado por '{kruskal_cat_feature}'"
+        )
+
+        df_kruskal = df_filtered[[kruskal_num_feature, kruskal_cat_feature]].dropna()
+
+        if df_kruskal.empty or df_kruskal[kruskal_cat_feature].nunique() < 2:
+            st.warning(
+                "Não há dados suficientes ou grupos (mínimo 2) para realizar o teste de Kruskal-Wallis com as seleções atuais."
+            )
+            return
+
+        try:
+            groups = [
+                group[kruskal_num_feature].values
+                for name, group in df_kruskal.groupby(kruskal_cat_feature)
             ]
-            if cols_for_mean:
-                df_filtered["NOTA_GERAL"] = df_filtered[cols_for_mean].mean(axis=1)
 
-            with st.container():
-                if (
-                    "Plots: Features Categóricas" in selected_visualizations
-                    and selected_cat_features
-                ):
-                    st.markdown("#### 📊 Distribuição de Features Categóricas")
-                    for feature in selected_cat_features:
-                        plot_categorical_feature(
-                            df,
-                            df_filtered,
-                            feature,
-                            c_type,
-                            cls,
-                            current_filters,
-                            classification_types,
-                            selected_classes,
-                        )
+            if len(groups) < 2:
+                st.warning(
+                    "São necessários pelo menos 2 grupos para realizar o teste de Kruskal-Wallis."
+                )
+                return
 
-                if (
-                    "Plots: Features Numéricas" in selected_visualizations
-                    and selected_num_features
-                ):
-                    st.markdown("#### 📈 Distribuição de Features Numéricas")
-                    for feature in selected_num_features:
-                        plot_numerical_feature(
-                            df, df_filtered, feature, c_type, cls, current_filters
-                        )
+            h_statistic, p_value = kruskal(*groups)
 
-                if "Teste ANOVA (Seleção Manual)" in selected_visualizations:
-                    st.markdown("#### 🧪 Teste ANOVA (Seleção Manual)")
-                    display_anova_test(
-                        df_filtered,
-                        c_type,
-                        cls,
-                        cat_features,
-                        num_features,
-                        COLUNAS_NOTAS,
-                    )
+            st.write(f"**H-Estatística:** {h_statistic:.2f}")
+            st.write(f"**p-valor:** {p_value:.5f}")
 
-                numerical_features_to_analyze = sorted(
-                    list(
-                        set(
-                            COLUNAS_NOTAS
-                            + ["NU_NOTA_REDACAO", "NOTA_GERAL"]
-                            + selected_num_features
-                        )
-                    )
+            if p_value < 0.05:
+                st.success(
+                    f"Há uma diferença estatisticamente significativa na distribuição de '{kruskal_num_feature}' "
+                    f"entre os grupos de '{kruskal_cat_feature}' (p < 0.05)."
+                )
+            else:
+                st.info(
+                    f"Não há evidência de diferença estatisticamente significativa na distribuição de '{kruskal_num_feature}' "
+                    f"entre os grupos de '{kruskal_cat_feature}' (p >= 0.05)."
                 )
 
-                if (
-                    "Estatísticas Gerais (Features Numéricas)"
-                    in selected_visualizations
-                ):
-                    st.markdown("#### Estatísticas Descritivas Gerais")
-                    display_general_numerical_stats(
-                        df_filtered, cls, numerical_features_to_analyze
-                    )
+            st.markdown(f"**Estatísticas Descritivas por Grupo:**")
+            st.dataframe(
+                df_kruskal.groupby(kruskal_cat_feature, observed=True)[
+                    kruskal_num_feature
+                ]
+                .agg(["count", "mean", "median", "std"])
+                .reset_index()
+            )
 
-                if any(
-                    s.startswith("Estatísticas Agrupadas")
-                    for s in selected_visualizations
-                ):
-                    st.markdown("#### Estatísticas Agrupadas")
-                    grouping_cat_feature = st.selectbox(
-                        f"Agrupar dados da categoria '{cls}' por:",
-                        options=["Nenhuma"] + cat_features,
-                        key=f"grouping_cat_{c_type}_{cls}",
-                    )
-                    if grouping_cat_feature != "Nenhuma":
-                        if (
-                            "Estatísticas Agrupadas (Contagens)"
-                            in selected_visualizations
-                        ):
-                            display_grouped_categorical_counts(
-                                df_filtered, cls, grouping_cat_feature
-                            )
-                        if (
-                            "Estatísticas Agrupadas (Médias/Medianas)"
-                            in selected_visualizations
-                        ):
-                            display_grouped_numerical_stats(
-                                df_filtered,
-                                cls,
-                                grouping_cat_feature,
-                                numerical_features_to_analyze,
-                            )
-
-            st.markdown("---")
-
-    st.info("Use a barra lateral para refinar a análise.")
+        except ValueError as ve:
+            st.warning(f"Erro ao realizar o teste de Kruskal-Wallis: {ve}.")
 
 
-if __name__ == "__main__":
-    main()
+def display_general_numerical_stats(df_filtered, cls, numerical_features_to_analyze):
+    """Exibe estatísticas descritivas gerais para features numéricas."""
+    st.markdown("#### 📜 Estatísticas Gerais para Features Numéricas")
+
+    cols_in_df = [
+        col for col in numerical_features_to_analyze if col in df_filtered.columns
+    ]
+
+    if not cols_in_df:
+        st.info(
+            "Nenhuma feature numérica selecionada está disponível nos dados filtrados."
+        )
+        return
+
+    try:
+        stats_df = df_filtered[cols_in_df].describe().transpose()
+        st.dataframe(stats_df)
+    except Exception as e:
+        st.error(f"Erro ao calcular estatísticas gerais para '{cls}': {e}")
+
+
+def display_grouped_categorical_counts(df_filtered, cls, grouping_cat_feature):
+    """Exibe contagens para uma feature categórica agrupada."""
+    st.markdown(
+        f"##### Contagem para **'{grouping_cat_feature}'** na Categoria **'{cls}'**"
+    )
+    try:
+        counts_df = df_filtered[grouping_cat_feature].value_counts().reset_index()
+        counts_df.columns = [grouping_cat_feature, "Contagem"]
+        st.dataframe(counts_df)
+    except Exception as e:
+        st.error(f"Erro ao calcular contagens para '{grouping_cat_feature}': {e}")
+
+
+def display_grouped_numerical_stats(
+    df_filtered, cls, grouping_cat_feature, numerical_features_to_analyze
+):
+    """Exibe estatísticas de média/mediana para features numéricas agrupadas por uma feature categórica."""
+    for num_feat in numerical_features_to_analyze:
+        if num_feat in df_filtered.columns and pd.api.types.is_numeric_dtype(
+            df_filtered[num_feat]
+        ):
+            st.markdown(
+                f"##### Estatísticas de '{num_feat}' por '{grouping_cat_feature}'"
+            )
+            try:
+                grouped_stats = (
+                    df_filtered.groupby(grouping_cat_feature, observed=True)[num_feat]
+                    .agg(["count", "mean", "median", "std"])
+                    .reset_index()
+                )
+                st.dataframe(grouped_stats)
+            except Exception as e:
+                st.error(f"Erro ao calcular estatísticas para '{num_feat}': {e}")

@@ -3,6 +3,7 @@ import pandas as pd
 from scipy.stats import chi2_contingency, f_oneway
 import numpy as np
 import plotly.express as px
+from scipy.stats import kruskal
 
 
 COLUNAS_NOTAS = [
@@ -273,3 +274,94 @@ def display_grouped_numerical_stats(
                 st.dataframe(grouped_stats)
             except Exception as e:
                 st.error(f"Erro ao calcular estatísticas para '{num_feat}': {e}")
+
+
+def display_kruskal_wallis_test(
+    df_filtered, c_type, cls, cat_features, num_features, COLUNAS_NOTAS
+):
+    """Exibe os resultados do teste de Kruskal-Wallis."""
+    st.markdown("---")
+    st.markdown(
+        "#### 🔬 Teste de Kruskal-Wallis (Alternativa não-paramétrica ao ANOVA)"
+    )
+    st.info(
+        "Use este teste para comparar as medianas de uma variável numérica entre dois ou mais grupos, "
+        "especialmente quando os dados não seguem uma distribuição normal."
+    )
+
+    kruskal_num_options = sorted(
+        list(set(num_features + COLUNAS_NOTAS + ["NOTA_GERAL"]))
+    )
+
+    kruskal_num_feature = st.selectbox(
+        f"Selecione a Feature Numérica (dependente) para Kruskal-Wallis na categoria '{cls}':",
+        options=["Nenhuma"]
+        + [
+            f
+            for f in kruskal_num_options
+            if f in df_filtered.columns
+            and pd.api.types.is_numeric_dtype(df_filtered[f])
+        ],
+        key=f"kruskal_manual_num_feature_{c_type}_{cls}",
+    )
+
+    kruskal_cat_feature = st.selectbox(
+        f"Selecione a Feature Categórica (independente) para Kruskal-Wallis na categoria '{cls}':",
+        options=["Nenhuma"] + [f for f in cat_features if f in df_filtered.columns],
+        key=f"kruskal_manual_cat_feature_{c_type}_{cls}",
+    )
+
+    if kruskal_num_feature != "Nenhuma" and kruskal_cat_feature != "Nenhuma":
+        st.markdown(
+            f"##### Kruskal-Wallis para '{kruskal_num_feature}' agrupado por '{kruskal_cat_feature}'"
+        )
+
+        df_kruskal = df_filtered[[kruskal_num_feature, kruskal_cat_feature]].dropna()
+
+        if df_kruskal.empty or df_kruskal[kruskal_cat_feature].nunique() < 2:
+            st.warning(
+                "Não há dados suficientes ou grupos (mínimo 2) para realizar o teste de Kruskal-Wallis com as seleções atuais."
+            )
+            return
+
+        try:
+            # Prepara os grupos de dados para o teste
+            groups = [
+                group[kruskal_num_feature].values
+                for name, group in df_kruskal.groupby(kruskal_cat_feature)
+            ]
+
+            # Valida se há pelo menos dois grupos para comparar
+            if len(groups) < 2:
+                st.warning(
+                    "São necessários pelo menos 2 grupos para realizar o teste de Kruskal-Wallis."
+                )
+                return
+
+            h_statistic, p_value = kruskal(*groups)
+
+            st.write(f"**H-Estatística:** {h_statistic:.2f}")
+            st.write(f"**p-valor:** {p_value:.5f}")
+
+            if p_value < 0.05:
+                st.success(
+                    f"Há uma diferença estatisticamente significativa na distribuição de '{kruskal_num_feature}' "
+                    f"entre os grupos de '{kruskal_cat_feature}' (p < 0.05)."
+                )
+            else:
+                st.info(
+                    f"Não há evidência de diferença estatisticamente significativa na distribuição de '{kruskal_num_feature}' "
+                    f"entre os grupos de '{kruskal_cat_feature}' (p >= 0.05)."
+                )
+
+            st.markdown(f"**Estatísticas Descritivas por Grupo:**")
+            st.dataframe(
+                df_kruskal.groupby(kruskal_cat_feature, observed=True)[
+                    kruskal_num_feature
+                ]
+                .agg(["count", "mean", "median", "std"])
+                .reset_index()
+            )
+
+        except ValueError as ve:
+            st.warning(f"Erro ao realizar o teste de Kruskal-Wallis: {ve}.")

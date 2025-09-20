@@ -1,0 +1,50 @@
+================================================================================
+        RELATÓRIO DE TESTE DE NORMALIDADE (ANDERSON-DARLING)
+================================================================================
+
+Hipótese Nula (H0): A amostra de dados provém de uma população com distribuição normal.
+Nível de Significância (alpha): 0.05
+--------------------------------------------------------------------------------
+
+Variável: NOTA_GERAL
+--------------------
+  - Estatística do Teste (A²): 6688.0426
+  - Valor Crítico (5%): 0.7870
+  - Conclusão: A hipótese nula de normalidade é REJEITADA. Os dados NÃO parecem seguir uma distribuição normal.
+
+Variável: NU_NOTA_CH
+--------------------
+  - Estatística do Teste (A²): 4469.5321
+  - Valor Crítico (5%): 0.7870
+  - Conclusão: A hipótese nula de normalidade é REJEITADA. Os dados NÃO parecem seguir uma distribuição normal.
+
+Variável: NU_NOTA_CN
+--------------------
+  - Estatística do Teste (A²): 22723.5187
+  - Valor Crítico (5%): 0.7870
+  - Conclusão: A hipótese nula de normalidade é REJEITADA. Os dados NÃO parecem seguir uma distribuição normal.
+
+Variável: NU_NOTA_LC
+--------------------
+  - Estatística do Teste (A²): 9608.3852
+  - Valor Crítico (5%): 0.7870
+  - Conclusão: A hipótese nula de normalidade é REJEITADA. Os dados NÃO parecem seguir uma distribuição normal.
+
+Variável: NU_NOTA_MT
+--------------------
+  - Estatística do Teste (A²): 44732.1665
+  - Valor Crítico (5%): 0.7870
+  - Conclusão: A hipótese nula de normalidade é REJEITADA. Os dados NÃO parecem seguir uma distribuição normal.
+
+Variável: NU_NOTA_REDACAO
+-------------------------
+  - Estatística do Teste (A²): 51825.4559
+  - Valor Crítico (5%): 0.7870
+  - Conclusão: A hipótese nula de normalidade é REJEITADA. Os dados NÃO parecem seguir uma distribuição normal.
+
+Variável: Q006
+--------------
+  - Estatística do Teste (A²): 650887.3686
+  - Valor Crítico (5%): 0.7870
+  - Conclusão: A hipótese nula de normalidade é REJEITADA. Os dados NÃO parecem seguir uma distribuição normal.
+
