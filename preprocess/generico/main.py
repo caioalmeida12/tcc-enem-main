@@ -72,25 +72,24 @@ MAPEAMENTO_PREENCHIMENTO_NA = {
 # Formato: {'NOME_DA_COLUNA': {'valor_texto_1': valor_num_1, ...}}
 MAPEAMENTO_CATEGORICO_PARA_NUMERICO = {
     "TP_SEXO": {"F": 0, "M": 1},
-    # Mapeamento da Renda Mensal (Questão 006) - Usando a média de cada faixa
     "Q006": {
-        "A": 0.00,  # Nenhuma Renda
-        "B": 606.00,  # Média de 0 a 1212.00
-        "C": 1515.01,  # Média de 1212.01 a 1818.00
-        "D": 2121.01,  # Média de 1818.01 a 2424.00
-        "E": 2727.01,  # Média de 2424.01 a 3030.00
-        "F": 3333.01,  # Média de 3030.01 a 3636.00
-        "G": 4242.01,  # Média de 3636.01 a 4848.00
-        "H": 5454.01,  # Média de 4848.01 a 6060.00
-        "I": 6666.01,  # Média de 6060.01 a 7272.00
-        "J": 7878.01,  # Média de 7272.01 a 8484.00
-        "K": 9090.01,  # Média de 8484.01 a 9696.00
-        "L": 10302.01,  # Média de 9696.01 a 10908.00
-        "M": 11514.01,  # Média de 10908.01 a 12120.00
-        "N": 13332.01,  # Média de 12120.01 a 14544.00
-        "O": 16362.01,  # Média de 14544.01 a 18180.00
-        "P": 21210.01,  # Média de 18180.01 a 24240.00
-        "Q": 24240.01,  # Limite inferior da faixa aberta
+        "A": 1,  # Nenhuma Renda
+        "B": 2,  # Até R$ 1.212,00
+        "C": 3,  # De R$ 1.212,01 até R$ 1.818,00
+        "D": 4,  # De R$ 1.818,01 até R$ 2.424,00
+        "E": 5,  # De R$ 2.424,01 até R$ 3.030,00
+        "F": 6,  # De R$ 3.030,01 até R$ 3.636,00
+        "G": 7,  # De R$ 3.636,01 até R$ 4.848,00
+        "H": 8,  # De R$ 4.848,01 até R$ 6.060,00
+        "I": 9,  # De R$ 6.060,01 até R$ 7.272,00
+        "J": 10,  # De R$ 7.272,01 até R$ 8.484,00
+        "K": 11,  # De R$ 8.484,01 até R$ 9.696,00
+        "L": 12,  # De R$ 9.696,01 até R$ 10.908,00
+        "M": 13,  # De R$ 10.908,01 até R$ 12.120,00
+        "N": 14,  # De R$ 12.120,01 até R$ 14.544,00
+        "O": 15,  # De R$ 14.544,01 até R$ 18.180,00
+        "P": 16,  # De R$ 18.180,01 até R$ 24.240,00
+        "Q": 17,  # Acima de R$ 24.240,00
     },
     # Mapeamento da Quantidade de Banheiros (Questão 008)
     "Q008": {
